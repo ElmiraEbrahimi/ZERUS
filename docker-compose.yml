@@ -1,0 +1,71 @@
+version: '3.9'
+
+services:
+  # PostgreSQL database for the application state
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Local Ethereum L1 node using reth in development mode. This
+  # container exposes JSON-RPC and WebSocket endpoints on the default
+  # ports. The chain resets on container restart.
+  eth:
+    image: ghcr.io/paradigmxyz/reth:latest
+    restart: unless-stopped
+    command: >-
+      node --datadir /root/devnet-chaindata
+           --dev
+           --dev.block-time 1s
+           --http
+           --http.addr 0.0.0.0
+           --ws
+           --ws.addr 0.0.0.0
+    ports:
+      - "8545:8545"
+      - "8546:8546"
+    volumes:
+      - reth_data:/root/devnet-chaindata
+
+  # Go API service. Built from the Dockerfile in this repository.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+      - eth
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8080}:${APP_PORT:-8080}"
+
+  # Optional zkSync local node. Uncomment the following lines and
+  # provide a suitable image if you wish to run a local zkSync
+  # environment. See the README for details on acquiring and
+  # configuring a zkSync node. If enabled, ensure ZKSYNC_RPC_URL
+  # points to this service (e.g. http://zksync:3050).
+  # zksync:
+  #   image: matterlabs/local-node:beta2.0
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3050:3050"
+  #     - "3051:3051"
+  #   environment:
+  #     DATABASE_URL: postgres://postgres@db/zksync_local
+  #     ETH_CLIENT_WEB3_URL: http://eth:8545
+  #   depends_on:
+  #     - db
+  #     - eth
+
+volumes:
+  postgres_data:
+  reth_data:
