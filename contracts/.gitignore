@@ -1,0 +1,42 @@
+# Gradle
+.gradle/
+build/
+bin/
+.project
+.classpath
+.settings/
+*.log
+*.bak
+*.swp
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# IntelliJ IDEA
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Minecraft Forge specific
+eclipse/
+mcp/
+run/
+local/
+versions/
+usercache.json
+
+cache/
+broadcast/
+zkout/
+out/

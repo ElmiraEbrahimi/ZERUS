@@ -1,156 +1,175 @@
-# ZERUS: A Zero-Knowledge Embedded Rollup Architecture for Cross-Rollup Interoperability
 
+# zkSync Local Stack + Counter Contract + Go HTTP API
 
-## Features
+This repository extends the Matter Labs **dockerized L2 stack** with:
 
-* **Modular Go architecture** – code is organised into small packages
-  under `internal/` and `cmd/` with clear responsibilities. The
-  architecture is intentionally simple so you can layer in more
-  complexity as needed.
-* **Ethereum and zkSync clients** – thin wrappers around the
-  `go‑ethereum` RPC client and a generic JSON‑RPC client for zkSync
-  operations. Both clients are configured via environment variables
-  (RPC URL, chain ID and timeouts).
-* **Bridge abstraction** – a service in `internal/bridge` that exposes
-  high‑level functions such as `SendL1ToL2Message` and `TrackStatus`. At
-  this stage the implementation simply records messages in memory and
-  marks them as sent. It’s designed so that you can later plug in
-  contract calls and event monitoring without refactoring callers.
-* **HTTP API** – a small server in `internal/api` exposes the bridge
-  functionality via JSON endpoints: `POST /bridge/l1-to-l2`, `POST
-  /bridge/l2-to-l1` and `GET /bridge/status/{id}`.
-* **Containerised development environment** – a `docker‑compose.yml`
-  brings up Postgres, a local Ethereum devnet using Reth and the Go
-  service. The Reth container is configured according to the devnet
-  example which runs a node in development mode with one second block
-  times and exposes JSON‑RPC/WebSocket interfaces on ports 8545 and
-  8546【155669985012267†L111-L124】. If you wish to run a local zkSync
-  node as well, see the optional section below.
+- A **Foundry project** containing a simple `Counter` contract  
+- A **deterministic deployment script** for zkSync local chain (chain ID `271`)  
+- A **Go HTTP API server** (Go 1.24, geth 1.16.7) exposing REST endpoints that interact with the Counter contract  
+- A **Dockerized Go service** included in the zk-chains Docker Compose stack  
 
-## Getting Started
+## Table of Contents
 
-### Prerequisites
+1. Prerequisites
+2. Repository Structure
+3. Start the zkSync Local Environment
+4. Deploy the Counter Contract
+5. Generate Go Bindings (Optional)
+6. Start the Go HTTP API
+7. API Usage Examples
+8. Environment Variables
+9. Makefile Shortcuts
 
-* Docker and docker‑compose installed on your machine.
-* Go ≥1.20 if you intend to run the service outside of Docker.
+## Prerequisites
 
-### Clone and bootstrap
+Install:
 
-```sh
-git clone <this‑repo>
-cd bridge-service
+- Docker + Docker Compose
+- Foundry (forge/cast)
+- Go 1.24.x
+- abigen (optional)
 
-# Copy the environment template and adjust values if needed
-cp .env.example .env
+## Repository Structure
 
-# Build dependencies
-go mod tidy
-
-# Build and run tests
-make build
-make test
+```
+dockerized_l2/
+├── local-setup/
+├── contracts/
+│   ├── src/Counter.sol
+│   ├── script/DeployCounter.s.sol
+│   └── foundry.toml
+├── go-server/
+│   ├── cmd/server/main.go
+│   ├── internal/{config,eth,server}
+│   ├── Dockerfile
+│   └── go.mod
+└── Makefile
 ```
 
-### Running locally with Docker
+## Start the zkSync Local Environment
 
-Start the full stack:
-
-```sh
+```
 make up
 ```
 
-This command starts Postgres, the Reth Ethereum node and the Go API. The API
-listens on `http://localhost:8080` by default (configurable via
-`APP_PORT`). The Reth devnet exposes JSON‑RPC on `http://localhost:8545` and
-WebSocket on `ws://localhost:8546` using the configuration borrowed from
-the Reth devnet example【155669985012267†L111-L124】. The default zkSync
-variables in `.env.example` point to `http://localhost:3050` and `ws://localhost:3051`,
-which correspond to the L2 RPC and WebSocket endpoints defined in the
-official local setup guide【344146198151240†L365-L372】. If you are not
-running a local zkSync node, point `ZKSYNC_RPC_URL` to a testnet or
-mainnet RPC provider.
+Endpoints:
 
-To stop and remove the containers:
+| Component     | URL                    |
+| ------------- | ---------------------- |
+| L2 JSON-RPC   | http://localhost:15100 |
+| L2 WS         | ws://localhost:15101   |
+| Explorer      | http://localhost:15005 |
+| Hyperexplorer | http://localhost:15000 |
+
+## Deploy the Counter Contract
+
+```
+export DEPLOYER_PRIVATE_KEY=<private key>
+export ZKSYNC_RPC_URL=http://localhost:15100
+
+cd contracts
+forge script script/DeployCounter.s.sol --rpc-url $ZKSYNC_RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+```
+
+Capture the deployed contract address and export:
+
+```
+export COUNTER_CONTRACT_ADDRESS=0x...
+```
+
+## Generate Go Bindings (Optional)
+
+```
+cd contracts
+abigen   --abi out/Counter.sol/Counter.abi.json   --bin out/Counter.sol/Counter.bin   --pkg eth   --type Counter   --out ../go-server/internal/eth/counter_binding.go
+```
+
+## Start the Go HTTP API
+
+```
+export ZKSYNC_RPC_URL=http://localhost:15100
+export ZKSYNC_CHAIN_ID=271
+export ZKSYNC_PRIVATE_KEY=0x...
+export COUNTER_CONTRACT_ADDRESS=0x...
+export HTTP_BIND_ADDR=:18000
+
+cd go-server
+go run ./cmd/server
+```
+
+## API Usage
+
+### Read counter value
+
+```
+curl http://localhost:18000/counter
+```
+
+### Increment counter
+
+```
+curl -X POST http://localhost:18000/counter/increment
+```
+
+### Health check
+
+```
+curl http://localhost:18000/health
+```
+
+## Environment Variables
+
+| Variable                 | Purpose            |
+| ------------------------ | ------------------ |
+| ZKSYNC_RPC_URL           | RPC endpoint       |
+| ZKSYNC_CHAIN_ID          | Must be 271        |
+| ZKSYNC_PRIVATE_KEY       | Signer private key |
+| COUNTER_CONTRACT_ADDRESS | Contract address   |
+| HTTP_BIND_ADDR           | Bind address       |
+
+## Makefile Shortcuts
 
 ```sh
+make up
 make down
+make deploy
+make server
+make build-docker
 ```
 
-### Optional: Running a local zkSync node
-
-Matter Labs publishes a [local setup](https://github.com/matter-labs/local-setup)
-repository that runs a full zkSync Era stack (Postgres, local L1 via Reth and
-the zkSync server). The guide lists the default RPC endpoints: L1 RPC
-`http://localhost:8545` and L2 RPC `http://localhost:3050`【344146198151240†L365-L372】.
-To integrate such a node into this project you have two options:
-
-1. Clone the `local-setup` repo and run its `start.sh` script. Update your
-   `.env` file so `ZKSYNC_RPC_URL` points to `http://localhost:3050` and
-   restart the API container.
-2. Uncomment the `zksync` service in `docker-compose.yml` and provide a
-   compatible image. Matter Labs publishes a `local-node` image on Docker
-   Hub, but note that it is large and subject to change. Ensure the
-   `DATABASE_URL` and `ETH_CLIENT_WEB3_URL` variables are set appropriately
-   (see comments in `docker-compose.yml`).
-
-### Using the HTTP API
-
-With the stack running you can exercise the endpoints with `curl` or any
-HTTP client. The examples below assume the API is running on port 8080.
-
-**Send a message from L1 to L2**
+## Install Forge
 
 ```sh
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"from":"0xSender","to":"0xRecipient","data":"0x"}' \
-  http://localhost:8080/bridge/l1-to-l2
-
-# Response:
-{"id":"<uuid>"}
+curl -L https://foundry.paradigm.xyz | bash
 ```
 
-**Send a message from L2 to L1**
+and then:
 
 ```sh
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"from":"0xSender","to":"0xRecipient","data":"0x"}' \
-  http://localhost:8080/bridge/l2-to-l1
+foundryup
 ```
 
-**Check message status**
+### foundry-zksync
 
 ```sh
-curl http://localhost:8080/bridge/status/<uuid>
+curl -L https://raw.githubusercontent.com/matter-labs/foundry-zksync/main/install-foundry-zksync | bash
 ```
 
-Initially the status will be `pending`; after a short delay it becomes
-`sent`. In a real implementation you would update this status based on
-transaction receipts and contract events.
-
-### Project Structure
-
+```sh
+foundryup-zksync
 ```
-bridge-service/
-├── cmd/               # entrypoints
-│   └── api/main.go    # starts the HTTP server
-├── internal/          # private application code
-│   ├── api/           # HTTP handlers
-│   ├── bridge/        # cross-layer messaging logic
-│   │   └── contracts/ # interfaces for future contract bindings
-│   ├── config/        # environment configuration loader
-│   ├── db/            # database connection setup
-│   ├── eth/           # Ethereum L1 client wrapper
-│   ├── log/           # logger initialisation
-│   └── zksync/        # zkSync L2 client wrapper
-├── contracts/         # Solidity sources and deployment scripts
-│   ├── src/
-│   ├── deploy/
-│   └── README.md
-├── scripts/           # helper scripts (migrations, setup)
-├── docker-compose.yml # orchestrates local services
-├── Dockerfile         # builds the Go binary
-├── .env.example       # sample environment configuration
-├── Makefile           # common development commands
-├── go.mod / go.sum    # Go module definitions
-└── README.md          # this document
+
+## Run
+
+1. make zksync  # wait for it set up
+2. make deploy  # deploys and copies the contract address to go-server
+3. make server  # runs the server
+
+### test go-server api:
+
+```sh
+curl http://localhost:18000/health
+curl http://localhost:18000/counter
+curl -X POST http://localhost:18000/counter/increment 
+curl http://localhost:18000/counter
 ```
