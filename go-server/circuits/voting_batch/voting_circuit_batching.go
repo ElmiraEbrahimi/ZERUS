@@ -1,0 +1,290 @@
+package votingbatch
+
+import (
+	"fmt"
+
+	tedwards "github.com/consensys/gnark-crypto/ecc/twistededwards"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/algebra/native/twistededwards"
+	"github.com/consensys/gnark/std/hash/mimc"
+	"github.com/consensys/gnark/std/math/bits"
+	"github.com/consensys/gnark/std/signature/eddsa"
+)
+
+const (
+	NumValidators   = 4 // could be 4, 8, 16, 32, 64, 128, 256.
+	MerkleTreeDepth = 3 // could be 2, 3,4,5,6,7,8
+	BatchSize       = 5 // could be 1, 5, 10, 15, 25, etc.
+
+	RewardAggregator = 500000000000000
+	RewardValidator  = 20000000000
+	// Severity            = 0
+	// ReputationIncrement = 2 // Reputation increase per correct vote
+	cost1 = 1
+)
+
+type BatchingVotingCircuit struct {
+	ResultingStateRoot frontend.Variable `gnark:",public"`
+	//*** RoundID, BatchCommitment, WithdrawalReqIDs are newly added ***
+	RoundID         frontend.Variable `gnark:",public"` // Public round index
+	BatchCommitment frontend.Variable `gnark:",public"` // Commitment hash of private WithdrawalReqIDs
+	MajorityVote    frontend.Variable `gnark:",public"` // Decimal value of a BatchSize-bit vote bitmask
+	ValidatorBits   frontend.Variable `gnark:",public"`
+	// WithdrawalReqIDs   [BatchSize]frontend.Variable //  Private input: request IDs being signed by validators
+	WithdrawalReqIDs [BatchSize]frontend.Variable // Slice
+	Aggregator       BatchingAggregatorConstraints
+	Validators       [NumValidators]BatchingValidatorConstraints
+}
+
+type BatchingAggregatorConstraints struct {
+	Index       frontend.Variable    `gnark:",public"`
+	PreSeed     twistededwards.Point `gnark:",public"`
+	PostSeed    twistededwards.Point `gnark:",public"`
+	SecretKey   frontend.Variable
+	Balance     frontend.Variable
+	MerkleProof MerkleProofW
+	// Reputation    frontend.Variable
+	// SeverityCount frontend.Variable
+}
+
+type BatchingValidatorConstraints struct {
+	Index       frontend.Variable
+	PublicKey   eddsa.PublicKey
+	Balance     frontend.Variable
+	MerkleProof MerkleProofW
+	Signature   eddsa.Signature
+	Vote        frontend.Variable // Validator's decision as decimal of a bitmask for b=5 vote 31 means 11111
+	// Reputation    frontend.Variable
+	// SeverityCount frontend.Variable
+}
+
+func powbatching(api frontend.API, x frontend.Variable, y frontend.Variable) frontend.Variable {
+	output := frontend.Variable(1)
+	b := bits.ToBinary(api, y, bits.WithNbDigits(256))
+	for i := 0; i < len(b); i++ {
+		if i != 0 {
+			output = api.Mul(output, output)
+		}
+		multiply := api.Mul(output, x)
+		output = api.Select(b[len(b)-1-i], multiply, output)
+	}
+	return output
+}
+
+func (c *BatchingVotingCircuit) Define(api frontend.API) error {
+
+	api.Println(" DUMPING VOTING CIRCUIT BATCHING INPUTS FORM OUTSIDE ")
+
+	api.Println("[batching_out] RoundID:", c.RoundID)
+	api.Println("[batching_out]  MajorityVote:", c.MajorityVote)
+	api.Println("[batching_out_circuit] ***** Aggregator Index:", c.Aggregator.Index)
+	api.Println("[batching_out]  Aggregator PreSeed:", c.Aggregator.PreSeed)
+	api.Println("[batching_out]  Aggregator Balance:", c.Aggregator.Balance)
+	api.Println("[batching_out]  Aggregator MerkleProof Path:", c.Aggregator.MerkleProof.Path)
+
+	curve, err := twistededwards.NewEdCurve(api, tedwards.BN254)
+	if err != nil {
+		return fmt.Errorf("curve initialization: %w", err)
+	}
+
+	hFunc, err := mimc.NewMiMC(api)
+	if err != nil {
+		return fmt.Errorf("hash function initialization: %w", err)
+	}
+
+	// Ensure unique validator IDs
+	for i := 0; i < NumValidators; i++ {
+		for j := 0; j < NumValidators; j++ {
+			if i == j {
+				continue
+			}
+			api.AssertIsDifferent(c.Validators[i].Index, c.Validators[j].Index)
+		}
+	}
+
+	// *** Recompute withdrawal request hash commitment ***
+	hFunc.Reset()
+	for i := 0; i < BatchSize; i++ {
+		api.Println("[batching_circuit_ids] WithdrawalReqIDs[", i, "]:", c.WithdrawalReqIDs[i])
+		hFunc.Write(c.WithdrawalReqIDs[i])
+	}
+
+	api.Println(" [batching_out] ***BatchCommitment :", c.BatchCommitment)
+	api.Println("[batching_circuit] ***BatchCommitment:", hFunc.Sum())
+	api.AssertIsEqual(c.BatchCommitment, hFunc.Sum()) // Bind proof to specific batch (public commitment)
+
+	// Compute next seed for the aggregator
+	seedAfter := curve.ScalarMul(c.Aggregator.PreSeed, c.Aggregator.SecretKey)
+
+	api.Println("[batching_out] Aggregator PostSeed:", c.Aggregator.PostSeed)
+	api.Println("[batching_circuit]  Aggregator expected PostSeed:", seedAfter)
+
+	api.AssertIsEqual(c.Aggregator.PostSeed.X, seedAfter.X)
+	api.AssertIsEqual(c.Aggregator.PostSeed.Y, seedAfter.Y)
+
+	// Compute aggregator public key
+	base := curve.Params().Base
+	basePoint := twistededwards.Point{X: base[0], Y: base[1]}
+	aggregatorPubKey := curve.ScalarMul(basePoint, c.Aggregator.SecretKey)
+
+	api.Println("[batching_circuit] Aggregator expected pubkey:", aggregatorPubKey)
+	curve.AssertIsOnCurve(aggregatorPubKey)
+
+	// Verify the aggregator Merkle proof
+	hFunc.Reset()
+	hFunc.Write(c.Aggregator.Index)
+	hFunc.Write(aggregatorPubKey.X)
+	hFunc.Write(aggregatorPubKey.Y)
+	hFunc.Write(c.Aggregator.Balance)
+	// change here
+	// hFunc.Write(c.Aggregator.Reputation)
+	// hFunc.Write(c.Aggregator.SeverityCount)
+
+	api.Println("[batching_out]  Aggregator MerkleProof Root:", c.Aggregator.MerkleProof.RootHash)
+	api.Println("[batching_out]  Aggregator MerkleProof Path[0]:", c.Aggregator.MerkleProof.Path[0])
+	api.Println("[batching_circuit] Aggregator computed leaf hash:", hFunc.Sum())
+
+	api.AssertIsEqual(hFunc.Sum(), c.Aggregator.MerkleProof.Path[0])
+	hFunc.Reset()
+	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index)
+	api.Println("[batching_circuit] Aggregator Verified Merkle proof...")
+	// Reward the aggregator for the batch
+	hFunc.Reset()
+	hFunc.Write(c.Aggregator.Index)
+	hFunc.Write(aggregatorPubKey.X)
+	hFunc.Write(aggregatorPubKey.Y)
+	hFunc.Write(api.Add(c.Aggregator.Balance, RewardAggregator))
+	// hFunc.Write(api.Add(c.Aggregator.Reputation, ReputationIncrement))
+	// hFunc.Write(api.Add(c.Aggregator.SeverityCount, Severity))
+	c.Aggregator.MerkleProof.Path[0] = hFunc.Sum()
+
+	hFunc.Reset()
+	intermediateRoot := c.Aggregator.MerkleProof.ComputeRootFromPath(api, hFunc, c.Aggregator.Index)
+	api.Println("[batching_circuit] Aggregator computed root hash:", intermediateRoot)
+	/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	// for checking the aggregator majorityvote correctness
+	// Majority counters (for votes 0 and 1)
+	count0 := frontend.Variable(0)
+	count1 := frontend.Variable(0)
+
+	validatorBits := frontend.Variable(0)
+
+	// Process validators
+	for _, validator := range c.Validators {
+		api.Println("*****Starting validator loop******")
+		api.Println("  *****[batching_out_Circuit] Validator Index:", validator.Index)
+		api.Println("  [batching_out] Validator PublicKey:", validator.PublicKey)
+		api.Println("  [batching_out] Validator Balance:", validator.Balance)
+		api.Println("  [batching_out] Validator Vote:", validator.Vote)
+		api.Println("  [batching_out] Validator MerkleProof Path:", validator.MerkleProof.Path)
+		api.Println("  [batching_out] Validator MerkleProof root hash:", validator.MerkleProof.RootHash)
+		api.Println("  [batching_out] Validator Signature:", validator.Signature)
+
+		hFunc.Reset()
+		api.Println("***starting valiator leaf hash computation***")
+		hFunc.Write(validator.Index)
+		hFunc.Write(validator.PublicKey.A.X)
+		hFunc.Write(validator.PublicKey.A.Y)
+		hFunc.Write(validator.Balance)
+		// hFunc.Write(validator.Reputation)
+		// hFunc.Write(validator.SeverityCount)
+
+		api.Println("[batching_circuit] Validator LeafHash  Index", validator.Index)
+		api.Println("[batching_circuit] Validator LeafHash  PubKey.X", validator.PublicKey.A.X)
+		api.Println("[batching_circuit] Validator LeafHash  PubKey.Y", validator.PublicKey.A.Y)
+		api.Println("[batching_circuit] Validator LeafHash  Balance", validator.Balance)
+
+		api.Println(validator.Index, "[batching_out]  Validator MerkleProof Root:", validator.MerkleProof.RootHash)
+		api.Println(validator.Index, "***[batching_circuit] Validator computed leaf hash:", hFunc.Sum())
+		api.Println(validator.Index, "***[batching_out]  Validator MerkleProof Path[0]:", validator.MerkleProof.Path[0])
+		api.AssertIsEqual(hFunc.Sum(), validator.MerkleProof.Path[0])
+		api.Println(validator.Index, "Assertion passed")
+
+		hFunc.Reset()
+		validator.MerkleProof.VerifyProof(api, hFunc, validator.Index)
+		api.Println(validator.Index, "[batching_circuit] Validator Verified Merkle proof succssed...")
+
+		////////////////////////////////////////////////////////////////////////////////////////////////////
+		// *** Signature includes all WithdrawalReqIDs[] + vote bitmask, binding vote to batch ***
+		hFunc.Reset()
+		hFunc.Write(validator.Index)
+		hFunc.Write(c.BatchCommitment)
+		hFunc.Write(validator.Vote)
+		hFunc.Write(c.RoundID) // bind to roundID:so even if someone tried to reuse their vote in a different round, it would fail verification.
+		msg := hFunc.Sum()
+
+		hFunc.Reset()
+		if err := eddsa.Verify(curve, validator.Signature, msg, validator.PublicKey, &hFunc); err != nil {
+			return fmt.Errorf("signature verification failed for batching circuit: %w", err)
+		}
+		/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		// 	// All validators must match the same majority vote value
+		// NEW PART here we can add if the assertion fails punish the validator
+		// api.AssertIsEqual(c.MajorityVote, validator.Vote)
+
+		// Majority counting
+		isZeroVote := api.IsZero(validator.Vote)
+		isOneVote := api.Sub(cost1, isZeroVote)
+
+		count0 = api.Add(count0, isZeroVote)
+		count1 = api.Add(count1, isOneVote)
+
+		// diff = validator.Vote - MajorityVote
+		diff := api.Sub(validator.Vote, c.MajorityVote)
+
+		// isHonest = 1 if diff == 0, else 0
+		isHonest := api.IsZero(diff)  // 1 if diff==0 else 0
+		api.AssertIsBoolean(isHonest) // safety
+
+		// honest gets +RewardValidator, dishonest gets 0 (full slash)
+		rewardedBalance := api.Add(validator.Balance, RewardValidator)
+		zeroBalance := api.Sub(validator.Balance, validator.Balance) // 0
+
+		// newBalance = isHonest ? rewardedBalance : 0
+		newBalance := api.Select(isHonest, rewardedBalance, zeroBalance)
+
+		// 	// Reward the validator
+		hFunc.Reset()
+		hFunc.Write(validator.Index)
+		hFunc.Write(validator.PublicKey.A.X)
+		hFunc.Write(validator.PublicKey.A.Y)
+		// hFunc.Write(api.Add(validator.Balance, RewardValidator))
+		hFunc.Write(newBalance)
+		// hFunc.Write(api.Add(validator.Reputation, ReputationIncrement))
+		// hFunc.Write(api.Add(validator.SeverityCount, Severity))
+		validator.MerkleProof.Path[0] = hFunc.Sum()
+
+		// 	//****sort and just need the last validator ComputeRootFromPath
+		hFunc.Reset()
+		intermediateRoot = validator.MerkleProof.ComputeRootFromPath(api, hFunc, validator.Index)
+
+		bitMask := powbatching(api, 2, validator.Index)
+		validatorBits = api.Add(validatorBits, bitMask)
+	}
+
+	// Compute real majority: isOneMajority = 1 if count1 > count0, else 0
+
+	// cmp ∈ {-1,0,1}: 1 if count1>count0, 0 if equal, -1 if count1<count0
+	cmp := api.Cmp(count1, count0)
+
+	// isOneMajority = 1  iff  cmp == 1
+	// So: cmp - 1 == 0  iff  cmp == 1
+	isOneMajority := api.IsZero(api.Sub(cmp, 1))
+	api.AssertIsBoolean(isOneMajority) // enforce it is 0 or 1
+
+	// Public input MajorityVote must match the circuit’s computed majority (0 or 1)
+	api.AssertIsBoolean(c.MajorityVote)
+	api.AssertIsEqual(isOneMajority, c.MajorityVote)
+
+	api.Println("[batching_out] ValidatorBits:", c.ValidatorBits)
+	api.Println(" [batching_circuit] ValidatorBits (bitmask):", validatorBits)
+
+	api.Println("[batching_out] ResultingStateRoot:", c.ResultingStateRoot)
+	api.Println(" [batching_circuit] ResultingStateRoot:", intermediateRoot)
+	api.AssertIsEqual(c.ValidatorBits, validatorBits)
+	api.AssertIsEqual(c.ResultingStateRoot, intermediateRoot)
+	api.Println("Successfully verified the batching circuit...")
+
+	return nil
+}
