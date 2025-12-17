@@ -17,9 +17,15 @@ import (
 )
 
 func main() {
-	// Best-effort load of a local .env file.
-	if err := godotenv.Load(); err != nil {
-		log.Printf("no .env file found or unable to load it: %v", err)
+	// Best-effort load of a .env file (repo root).
+	//
+	// Supported run modes:
+	//   - from repo root:       go run ./go-server/cmd/server
+	//   - from go-server/:      go run ./cmd/server
+	if err := godotenv.Load(".env"); err != nil {
+		if err2 := godotenv.Load("../.env"); err2 != nil {
+			log.Printf("no .env file found or unable to load it: %v", err2)
+		}
 	}
 
 	cfg, err := config.Load()

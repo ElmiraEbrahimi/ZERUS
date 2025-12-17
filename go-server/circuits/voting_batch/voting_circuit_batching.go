@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	// *** Circuit parameters
 	NumValidators   = 4 // could be 4, 8, 16, 32, 64, 128, 256.
 	MerkleTreeDepth = 3 // could be 2, 3,4,5,6,7,8
 	BatchSize       = 5 // could be 1, 5, 10, 15, 25, etc.
@@ -93,7 +92,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		return fmt.Errorf("hash function initialization: %w", err)
 	}
 
-	// ***Ensure unique validator IDs
+	// Ensure unique validator IDs
 	for i := 0; i < NumValidators; i++ {
 		for j := 0; j < NumValidators; j++ {
 			if i == j {
@@ -103,7 +102,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		}
 	}
 
-	// Recompute withdrawal request hash commitment
+	// *** Recompute withdrawal request hash commitment ***
 	hFunc.Reset()
 	for i := 0; i < BatchSize; i++ {
 		api.Println("[batching_circuit_ids] WithdrawalReqIDs[", i, "]:", c.WithdrawalReqIDs[i])
@@ -123,7 +122,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	api.AssertIsEqual(c.Aggregator.PostSeed.X, seedAfter.X)
 	api.AssertIsEqual(c.Aggregator.PostSeed.Y, seedAfter.Y)
 
-	// *** Compute aggregator public key
+	// Compute aggregator public key
 	base := curve.Params().Base
 	basePoint := twistededwards.Point{X: base[0], Y: base[1]}
 	aggregatorPubKey := curve.ScalarMul(basePoint, c.Aggregator.SecretKey)
@@ -131,7 +130,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	api.Println("[batching_circuit] Aggregator expected pubkey:", aggregatorPubKey)
 	curve.AssertIsOnCurve(aggregatorPubKey)
 
-	// ***Verify the aggregator Merkle proof
+	// Verify the aggregator Merkle proof
 	hFunc.Reset()
 	hFunc.Write(c.Aggregator.Index)
 	hFunc.Write(aggregatorPubKey.X)
@@ -149,7 +148,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	hFunc.Reset()
 	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index)
 	api.Println("[batching_circuit] Aggregator Verified Merkle proof...")
-	// ***Reward the aggregator for the batch
+	// Reward the aggregator for the batch
 	hFunc.Reset()
 	hFunc.Write(c.Aggregator.Index)
 	hFunc.Write(aggregatorPubKey.X)
@@ -164,14 +163,14 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	api.Println("[batching_circuit] Aggregator computed root hash:", intermediateRoot)
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	// ***for checking the aggregator majorityvote correctness
+	// for checking the aggregator majorityvote correctness
 	// Majority counters (for votes 0 and 1)
 	count0 := frontend.Variable(0)
 	count1 := frontend.Variable(0)
 
 	validatorBits := frontend.Variable(0)
 
-	// ***Process validators
+	// Process validators
 	for _, validator := range c.Validators {
 		api.Println("*****Starting validator loop******")
 		api.Println("  *****[batching_out_Circuit] Validator Index:", validator.Index)
@@ -203,12 +202,11 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		api.Println(validator.Index, "Assertion passed")
 
 		hFunc.Reset()
-		// ***Verify the validator Merkle proof
 		validator.MerkleProof.VerifyProof(api, hFunc, validator.Index)
 		api.Println(validator.Index, "[batching_circuit] Validator Verified Merkle proof succssed...")
 
 		////////////////////////////////////////////////////////////////////////////////////////////////////
-		// *** Verify Validators Signature: includes all WithdrawalReqIDs[] + vote bitmask, binding vote to batch ***
+		// *** Signature includes all WithdrawalReqIDs[] + vote bitmask, binding vote to batch ***
 		hFunc.Reset()
 		hFunc.Write(validator.Index)
 		hFunc.Write(c.BatchCommitment)
@@ -239,14 +237,14 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		isHonest := api.IsZero(diff)  // 1 if diff==0 else 0
 		api.AssertIsBoolean(isHonest) // safety
 
-		// *** for giving reward:honest gets +RewardValidator, dishonest gets 0 (full slash)
+		// honest gets +RewardValidator, dishonest gets 0 (full slash)
 		rewardedBalance := api.Add(validator.Balance, RewardValidator)
 		zeroBalance := api.Sub(validator.Balance, validator.Balance) // 0
 
 		// newBalance = isHonest ? rewardedBalance : 0
 		newBalance := api.Select(isHonest, rewardedBalance, zeroBalance)
 
-		// ***Reward the validator
+		// 	// Reward the validator
 		hFunc.Reset()
 		hFunc.Write(validator.Index)
 		hFunc.Write(validator.PublicKey.A.X)
@@ -257,7 +255,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// hFunc.Write(api.Add(validator.SeverityCount, Severity))
 		validator.MerkleProof.Path[0] = hFunc.Sum()
 
-		// sort and just need the last validator ComputeRootFromPath
+		// 	//****sort and just need the last validator ComputeRootFromPath
 		hFunc.Reset()
 		intermediateRoot = validator.MerkleProof.ComputeRootFromPath(api, hFunc, validator.Index)
 
@@ -275,7 +273,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	isOneMajority := api.IsZero(api.Sub(cmp, 1))
 	api.AssertIsBoolean(isOneMajority) // enforce it is 0 or 1
 
-	// ***Public input MajorityVote must match the circuit’s computed majority (0 or 1)
+	// Public input MajorityVote must match the circuit’s computed majority (0 or 1)
 	api.AssertIsBoolean(c.MajorityVote)
 	api.AssertIsEqual(isOneMajority, c.MajorityVote)
 

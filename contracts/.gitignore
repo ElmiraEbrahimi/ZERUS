@@ -40,3 +40,5 @@ cache/
 broadcast/
 zkout/
 out/
+
+.env

@@ -1,1 +1,7 @@
 local-setup/.DS_Store
+
+# Environment files
+.env
+
+.DS_Store
+**/.DS_Store

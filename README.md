@@ -165,7 +165,7 @@ foundryup-zksync
 2. make deploy  # deploys and copies the contract address to go-server
 3. make server  # runs the server
 
-### test go-server api:
+### test go-server api
 
 ```sh
 curl http://localhost:18000/health
@@ -173,3 +173,9 @@ curl http://localhost:18000/counter
 curl -X POST http://localhost:18000/counter/increment 
 curl http://localhost:18000/counter
 ```
+
+## TODO
+
+- add logs for transactions and their costs
+- add and run another l1/l2 via docker-compose
+- include zkpact to go-server
