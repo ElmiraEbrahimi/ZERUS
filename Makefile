@@ -1,6 +1,7 @@
 .PHONY: server
 server:
-	go run ./go-server/cmd/server
+	cd go-server && go run ./cmd/server
+
 
 .PHONY: zksync
 zksync:
