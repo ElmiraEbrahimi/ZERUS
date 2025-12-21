@@ -12,6 +12,8 @@ import (
 
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
+
+	// "l2alchemy/internal/oracle_runtime"
 	servers "l2alchemy/internal/server"
 	"l2alchemy/internal/zkkeys"
 )
@@ -34,6 +36,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialise counter client: %v", err)
 	}
+
+	// oracleEngine, err := oracle_runtime.Init(cfg)
+	// if err != nil {
+	// 	log.Fatalf("failed to initialise oracle runtime: %v", err)
+	// }
+	// log.Printf("oracle runtime ready: state=%s users=%d", len(oracleEngine.Users))
 
 	keyDir := resolveKeyDir()
 	zkMgr := zkkeys.New(keyDir)
@@ -70,12 +78,12 @@ func main() {
 func resolveKeyDir() string {
 	wd, err := os.Getwd()
 	if err != nil {
-		return filepath.Join("build", "keys")
+		return filepath.Join("circuits", "build", "keys")
 	}
 	// If started from repo root, prefer go-server/build/keys.
 	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
-		return filepath.Join(wd, "go-server", "build", "keys")
+		return filepath.Join(wd, "go-server", "circuits", "build", "keys")
 	}
 	// Otherwise assume current working dir is go-server/.
-	return filepath.Join(wd, "build", "keys")
+	return filepath.Join(wd, "circuits", "build", "keys")
 }

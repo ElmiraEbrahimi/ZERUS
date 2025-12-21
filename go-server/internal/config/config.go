@@ -24,8 +24,6 @@ type Config struct {
 	// Strings
 	RPCURL          string `env:"ZKSYNC_RPC_URL,required"`
 	PrivateKey      string `env:"ZKSYNC_PRIVATE_KEY,required"`
-	DeployerKey     string `env:"DEPLOYER_PRIVATE_KEY,required"`
-	DeployerAddress string `env:"DEPLOYER_ADDRESS,required"`
 
 	CounterContractAddress     string `env:"COUNTER_CONTRACT_ADDRESS,required"`
 	MerkleVerifierAddress      string `env:"MERKLE_VERIFIER_ADDRESS,required"`
@@ -212,5 +210,5 @@ func printEnvValues(cfg *Config) {
 		)
 	}
 
-	log.Println("=== End configuration dump ===\n")
+	log.Printf("=== End configuration dump ===\n\n")
 }
