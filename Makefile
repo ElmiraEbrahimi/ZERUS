@@ -200,5 +200,5 @@ zip:
 	@TIMESTAMP=$$(date +"%Y%m%d_%H%M%S"); \
 	zip -r archive_$$TIMESTAMP.zip . \
 		-x ".git/*" \
-		-x "go-server/build/*" \
+		-x "go-server/circuits/build/*" \
 		-x "*.zip"
