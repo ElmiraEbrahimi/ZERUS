@@ -6,14 +6,14 @@ import "../src/Counter.sol";
 
 /// @title DeployCounter
 /// @notice A Foundry script that deploys the Counter contract to a configured zkSync L2.
-/// It reads the deployer's private key from the `DEPLOYER_PRIVATE_KEY` environment
+/// It reads the deployer's private key from the `ZKSYNC_PRIVATE_KEY` environment
 /// variable and broadcasts the transaction to the network specified by the Foundry
 /// configuration. After deployment the script logs the address of the new contract.
 contract DeployCounter is Script {
     function run() external {
         // The deployer's private key is expected to be provided via environment
         // variables. See foundry.toml for the network configuration.
-        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerKey = vm.envUint("ZKSYNC_PRIVATE_KEY");
         vm.startBroadcast(deployerKey);
         Counter counter = new Counter();
         vm.stopBroadcast();

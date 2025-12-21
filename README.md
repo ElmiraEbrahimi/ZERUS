@@ -64,11 +64,11 @@ Endpoints:
 ## Deploy the Counter Contract
 
 ```
-export DEPLOYER_PRIVATE_KEY=<private key>
+export ZKSYNC_PRIVATE_KEY=<private key>
 export ZKSYNC_RPC_URL=http://localhost:15100
 
 cd contracts
-forge script script/DeployCounter.s.sol --rpc-url $ZKSYNC_RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+forge script script/DeployCounter.s.sol --rpc-url $ZKSYNC_RPC_URL --broadcast --private-key $ZKSYNC_PRIVATE_KEY
 ```
 
 Capture the deployed contract address and export:
@@ -172,10 +172,7 @@ curl http://localhost:18000/health
 curl http://localhost:18000/counter
 curl -X POST http://localhost:18000/counter/increment 
 curl http://localhost:18000/counter
+
+curl -X POST http://localhost:18000/circuits/keygen -H "Content-Type: application/json"
+curl http://localhost:18000/circuits/keys 
 ```
-
-## TODO
-
-- add logs for transactions and their costs
-- add and run another l1/l2 via docker-compose
-- include zkpact to go-server

@@ -6,7 +6,7 @@ import "../src/oracle.sol";
 
 contract DeployOracle is Script {
     function run() external returns (address oracleAddr) {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("ZKSYNC_PRIVATE_KEY");
 
         uint256 levels = vm.envUint("ORACLE_LEVELS");
         uint256 seedX = vm.envUint("ORACLE_SEED_X");

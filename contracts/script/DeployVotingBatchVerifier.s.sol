@@ -6,7 +6,7 @@ import "../src/VotingBatchVerifier.sol";
 
 contract DeployVotingBatchVerifier is Script {
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("ZKSYNC_PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
         Verifier verifier = new Verifier();
