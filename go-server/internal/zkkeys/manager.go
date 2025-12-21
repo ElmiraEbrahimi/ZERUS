@@ -16,148 +16,154 @@ import (
 type CircuitName string
 
 const (
-    CircuitMerkleProof CircuitName = "merkle_proof"
-    CircuitVotingBatch CircuitName = "voting_batch"
+	CircuitMerkleProof CircuitName = "merkle_proof"
+	CircuitVotingBatch CircuitName = "voting_batch"
 )
 
 // KeyPaths points to the pk/vk files for a circuit.
 type KeyPaths struct {
-    PK string `json:"pk"`
-    VK string `json:"vk"`
+	PK string `json:"pk"`
+	VK string `json:"vk"`
 }
 
 // KeyStatus describes whether keys exist on disk.
 type KeyStatus struct {
-    Circuit  CircuitName `json:"circuit"`
-    Paths    KeyPaths    `json:"paths"`
-    PKExists bool        `json:"pk_exists"`
-    VKExists bool        `json:"vk_exists"`
-	PKSizeBytes int64      `json:"pk_size_bytes"`
-	VKSizeBytes int64      `json:"vk_size_bytes"`
-	PKModTime   *time.Time `json:"pk_mod_time,omitempty"`
-	VKModTime   *time.Time `json:"vk_mod_time,omitempty"`
-	PKCreated   *time.Time `json:"pk_created_time,omitempty"`
-	VKCreated   *time.Time `json:"vk_created_time,omitempty"`
-    Ready    bool        `json:"ready"`
+	Circuit     CircuitName `json:"circuit"`
+	Paths       KeyPaths    `json:"paths"`
+	PKExists    bool        `json:"pk_exists"`
+	VKExists    bool        `json:"vk_exists"`
+	PKSizeBytes int64       `json:"pk_size_bytes"`
+	VKSizeBytes int64       `json:"vk_size_bytes"`
+	PKModTime   *time.Time  `json:"pk_mod_time,omitempty"`
+	VKModTime   *time.Time  `json:"vk_mod_time,omitempty"`
+	PKCreated   *time.Time  `json:"pk_created_time,omitempty"`
+	VKCreated   *time.Time  `json:"vk_created_time,omitempty"`
+	Ready       bool        `json:"ready"`
 }
 
 // KeyGenMetrics summarizes resource usage for compilation + setup.
 type KeyGenMetrics struct {
-    MemoryMB int `json:"memory_mb"`
-    TimeMS   int `json:"time_ms"`
+	MemoryMB int `json:"memory_mb"`
+	TimeMS   int `json:"time_ms"`
 }
 
 // KeyGenResult is returned by generation calls.
 type KeyGenResult struct {
-    Circuit   CircuitName   `json:"circuit"`
-    Generated bool          `json:"generated"`
-    Already   bool          `json:"already_present"`
-    Paths     KeyPaths      `json:"paths"`
-    Metrics   KeyGenMetrics `json:"metrics"`
+	Circuit   CircuitName   `json:"circuit"`
+	Generated bool          `json:"generated"`
+	Already   bool          `json:"already_present"`
+	Paths     KeyPaths      `json:"paths"`
+	Metrics   KeyGenMetrics `json:"metrics"`
 }
 
 // Manager owns key locations and provides concurrency-safe generation/status.
 type Manager struct {
-    baseDir string
-    mu      sync.Mutex
-    running bool
+	baseDir string
+	mu      sync.Mutex
+	running bool
 }
 
 // New constructs a Manager. baseDir should be an absolute or working-directory-relative path.
 func New(baseDir string) *Manager {
-    return &Manager{baseDir: baseDir}
+	return &Manager{baseDir: baseDir}
+}
+
+// PathsFor returns the pk/vk filesystem paths for a circuit within baseDir.
+func PathsFor(baseDir string, c CircuitName) KeyPaths {
+	dir := filepath.Join(baseDir, string(c))
+	return KeyPaths{PK: filepath.Join(dir, "pk"), VK: filepath.Join(dir, "vk")}
 }
 
 func (m *Manager) pathsFor(c CircuitName) KeyPaths {
-    dir := filepath.Join(m.baseDir, string(c))
-    return KeyPaths{PK: filepath.Join(dir, "pk"), VK: filepath.Join(dir, "vk")}
+	return PathsFor(m.baseDir, c)
 }
 
 // Status returns pk/vk existence information for all supported circuits.
 func (m *Manager) Status() []KeyStatus {
-    circuits := []CircuitName{CircuitMerkleProof, CircuitVotingBatch}
-    out := make([]KeyStatus, 0, len(circuits))
-    for _, c := range circuits {
-        p := m.pathsFor(c)
+	circuits := SupportedCircuits()
+	out := make([]KeyStatus, 0, len(circuits))
+	for _, c := range circuits {
+		p := m.pathsFor(c)
 		pkMeta := fileMeta(p.PK)
 		vkMeta := fileMeta(p.VK)
-        out = append(out, KeyStatus{
-            Circuit:  c,
-            Paths:    p,
-			PKExists: pkMeta.Exists,
-			VKExists: vkMeta.Exists,
+		out = append(out, KeyStatus{
+			Circuit:     c,
+			Paths:       p,
+			PKExists:    pkMeta.Exists,
+			VKExists:    vkMeta.Exists,
 			PKSizeBytes: pkMeta.Size,
 			VKSizeBytes: vkMeta.Size,
 			PKModTime:   pkMeta.ModTime,
 			VKModTime:   vkMeta.ModTime,
 			PKCreated:   pkMeta.CreatedTime,
 			VKCreated:   vkMeta.CreatedTime,
-			Ready:    pkMeta.Exists && vkMeta.Exists,
-        })
-    }
-    return out
+			Ready:       pkMeta.Exists && vkMeta.Exists,
+		})
+	}
+	return out
 }
 
 // GenerateAll generates keys for both circuits. If keys already exist for a circuit, it is skipped.
 // The operation is serialized; a concurrent caller receives an error.
 func (m *Manager) GenerateAll() ([]KeyGenResult, error) {
-    m.mu.Lock()
-    if m.running {
-        m.mu.Unlock()
-        return nil, errors.New("key generation already in progress")
-    }
-    m.running = true
-    m.mu.Unlock()
+	m.mu.Lock()
+	if m.running {
+		m.mu.Unlock()
+		return nil, errors.New("key generation already in progress")
+	}
+	m.running = true
+	m.mu.Unlock()
 
-    defer func() {
-        m.mu.Lock()
-        m.running = false
-        m.mu.Unlock()
-    }()
+	defer func() {
+		m.mu.Lock()
+		m.running = false
+		m.mu.Unlock()
+	}()
 
-    // Ensure base directory exists.
-    if err := os.MkdirAll(m.baseDir, 0o755); err != nil {
-        return nil, fmt.Errorf("create base dir: %w", err)
-    }
+	// Ensure base directory exists.
+	if err := os.MkdirAll(m.baseDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create base dir: %w", err)
+	}
 
-    // Generate sequentially to limit peak memory usage.
-    results := make([]KeyGenResult, 0, 2)
-    for _, c := range []CircuitName{CircuitMerkleProof, CircuitVotingBatch} {
-        r, err := m.Generate(c)
-        if err != nil {
-            return results, err
-        }
-        results = append(results, r)
-    }
-    return results, nil
+	// Generate sequentially to limit peak memory usage.
+	circuits := SupportedCircuits()
+	results := make([]KeyGenResult, 0, len(circuits))
+	for _, c := range circuits {
+		r, err := m.Generate(c)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, r)
+	}
+	return results, nil
 }
 
 // Generate generates keys for a single circuit. If keys already exist, it returns Already=true.
 func (m *Manager) Generate(c CircuitName) (KeyGenResult, error) {
-    p := m.pathsFor(c)
+	p := m.pathsFor(c)
 	pkMeta, vkMeta := fileMeta(p.PK), fileMeta(p.VK)
-	if pkMeta.Exists && vkMeta.Exists { // always generateing
-        // return KeyGenResult{Circuit: c, Generated: false, Already: true, Paths: p}, nil  // 
-    }
+	if pkMeta.Exists && vkMeta.Exists {
+		return KeyGenResult{Circuit: c, Generated: false, Already: true, Paths: p}, nil
+	}
 
-    if err := os.MkdirAll(filepath.Dir(p.PK), 0o755); err != nil {
-        return KeyGenResult{}, fmt.Errorf("create circuit dir: %w", err)
-    }
+	if err := os.MkdirAll(filepath.Dir(p.PK), 0o755); err != nil {
+		return KeyGenResult{}, fmt.Errorf("create circuit dir: %w", err)
+	}
 
-	memMB, timeMS, err := GenerateKeysToFiles(c, p.PK, p.VK)
+	_, _, _, memMB, timeMS, err := GenerateKeysToFiles(c, p.PK, p.VK, false)
 	if err != nil {
 		return KeyGenResult{}, err
 	}
 
 	log.Printf("generated keys for %s (pk=%s vk=%s) in %dms, peak mem %dMB", c, p.PK, p.VK, timeMS, memMB)
 
-    return KeyGenResult{
-        Circuit:   c,
-        Generated: true,
-        Already:   false,
-        Paths:     p,
-        Metrics:   KeyGenMetrics{MemoryMB: memMB, TimeMS: timeMS},
-    }, nil
+	return KeyGenResult{
+		Circuit:   c,
+		Generated: true,
+		Already:   false,
+		Paths:     p,
+		Metrics:   KeyGenMetrics{MemoryMB: memMB, TimeMS: timeMS},
+	}, nil
 }
 
 type meta struct {
@@ -198,8 +204,8 @@ func fileMeta(path string) meta {
 // in a portable way (without depending on OS-specific field names at compile time).
 //
 // Priority order:
-//   1) Birth time (macOS / BSD)
-//   2) Inode change time (ctime) (Linux)
+//  1. Birth time (macOS / BSD)
+//  2. Inode change time (ctime) (Linux)
 //
 // If neither can be extracted, it returns (zero, false).
 func bestEffortCreatedTime(st *syscall.Stat_t) (time.Time, bool) {
