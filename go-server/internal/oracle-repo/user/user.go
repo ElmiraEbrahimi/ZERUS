@@ -1,6 +1,7 @@
 package user
 
 import (
+	merkleproof "l2alchemy/circuits/merkle_proof"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
 	"l2alchemy/internal/oracle-repo"
@@ -17,7 +18,6 @@ import (
 	"log"
 	"math/big"
 	"reflect"
-	"sync"
 
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
@@ -32,14 +32,11 @@ import (
 	// Used for assigning EdDSA witness variables (inside circuit)
 	"github.com/consensys/gnark-crypto/ecc"
 	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
-	tedwards "github.com/consensys/gnark-crypto/ecc/twistededwards"
 	"github.com/consensys/gnark-crypto/hash"
-	eddsa2 "github.com/consensys/gnark/std/signature/eddsa"
 )
 
 type User struct {
 	cfg             *config.Config
-	wg              *sync.WaitGroup
 	ecdsaPrivateKey *ecdsa.PrivateKey
 	ethClient       *ethclient.Client
 	IPFSClient      *db.IPFSClient
@@ -49,14 +46,12 @@ type User struct {
 
 	Name string `json:"name"`
 
-	circuit              *gnark.MerkleProofCircuit
-	commitmentHashBytes  []byte
-	nullifierBytes       []byte
-	nullifierHashBytes   []byte
-	secretBytes          []byte
-	destinationIDBytes   []byte
-	credentialsBytes     []byte
-	credentialsHashBytes []byte
+	circuit             *merkleproof.MerkleProofCircuit
+	commitmentHashBytes []byte
+	nullifierBytes      []byte
+	nullifierHashBytes  []byte
+	secretBytes         []byte
+	destinationIDBytes  []byte
 
 	Account *gnark.Account
 
@@ -88,14 +83,13 @@ func init() {
 	issuerPublicKey = &issuerPrivateKey.PublicKey
 }
 
-func NewUser(wg *sync.WaitGroup, cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, circuit *gnark.MerkleProofCircuit, r1cs constraint.ConstraintSystem, pk groth16.ProvingKey, vk groth16.VerifyingKey, name string, privateKey *eddsa.PrivateKey, account *gnark.Account) User {
+func NewUser(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, circuit *merkleproof.MerkleProofCircuit, r1cs constraint.ConstraintSystem, pk groth16.ProvingKey, vk groth16.VerifyingKey, name string, privateKey *eddsa.PrivateKey, account *gnark.Account) User {
 	ecdsaPrivateKey, err := crypto.HexToECDSA(cfg.UserPK)
 	if err != nil {
 		panic(fmt.Errorf("failed to parse ecdsaPrivateKey: %v", err))
 	}
 
 	return User{
-		wg:              wg,
 		cfg:             cfg,
 		ecdsaPrivateKey: ecdsaPrivateKey,
 		ethClient:       ethClient,
@@ -110,46 +104,46 @@ func NewUser(wg *sync.WaitGroup, cfg *config.Config, ethClient *ethclient.Client
 	}
 }
 
-func (u *User) ListenToBc(quit chan struct{}) {
-	contractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
+// func (u *User) ListenToBc(quit chan struct{}) {
+// 	contractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 
-	// filterers:
-	oracleFilterer, err := bc.NewOracleFilterer(contractAddr, u.ethClient)
-	if err != nil {
-		log.Fatalf("create oracle filterer: %v", err)
-	}
-	registeredEventChan := make(chan *bc.OracleUserRegistered)
+// 	// filterers:
+// 	oracleFilterer, err := bc.NewOracleFilterer(contractAddr, u.ethClient)
+// 	if err != nil {
+// 		log.Fatalf("create oracle filterer: %v", err)
+// 	}
+// 	registeredEventChan := make(chan *bc.OracleUserRegistered)
 
-	// event subs:
-	ctx := context.Background()
-	registeredSub, err := oracleFilterer.WatchUserRegistered(&bind.WatchOpts{Context: ctx}, registeredEventChan)
-	if err != nil {
-		log.Fatalf("set up \"registered\" subscription: %v", err)
-	}
+// 	// event subs:
+// 	ctx := context.Background()
+// 	registeredSub, err := oracleFilterer.WatchUserRegistered(&bind.WatchOpts{Context: ctx}, registeredEventChan)
+// 	if err != nil {
+// 		log.Fatalf("set up \"registered\" subscription: %v", err)
+// 	}
 
-	u.wg.Add(1)
-	defer u.wg.Done()
-	go func() {
-		for {
-			select {
-			// new aggregator event:
-			case registeredEvent := <-registeredEventChan:
-				u.Account.Index = registeredEvent.Index
-				u.Account.Balance = registeredEvent.Balance
-				fmt.Printf("user=%v registered: %v\n", u.Name, u.Account)
-			// sub errors:
-			case err := <-registeredSub.Err():
-				log.Fatalf("registered sub error: %v\n", err)
-			// quit:
-			case <-quit:
-				fmt.Printf("blockchain listener of user %v quitting...\n", u.Name)
-				registeredSub.Unsubscribe()
-				close(registeredEventChan)
-				return
-			}
-		}
-	}()
-}
+// 	u.wg.Add(1)
+// 	defer u.wg.Done()
+// 	go func() {
+// 		for {
+// 			select {
+// 			// new aggregator event:
+// 			case registeredEvent := <-registeredEventChan:
+// 				u.Account.Index = registeredEvent.Index
+// 				u.Account.Balance = registeredEvent.Balance
+// 				fmt.Printf("user=%v registered: %v\n", u.Name, u.Account)
+// 			// sub errors:
+// 			case err := <-registeredSub.Err():
+// 				log.Fatalf("registered sub error: %v\n", err)
+// 			// quit:
+// 			case <-quit:
+// 				fmt.Printf("blockchain listener of user %v quitting...\n", u.Name)
+// 				registeredSub.Unsubscribe()
+// 				close(registeredEventChan)
+// 				return
+// 			}
+// 		}
+// 	}()
+// }
 
 func (u *User) GetBalance() (uint, uint) {
 	fmt.Printf("getting balance for user=%v ...\n", u.Name)
@@ -175,42 +169,50 @@ func (u *User) GetBalance() (uint, uint) {
 	return uint(tokenOneBalance.Uint64()), uint(tokenTwoBalance.Uint64())
 }
 
-func (u *User) RegisterUserTx() error {
+// RegisterUserTx registers the user on-chain and waits for the receipt.
+// It returns the transaction hash on success.
+func (u *User) RegisterUserTx() (string, error) {
 	fmt.Printf("registering user=%v ...\n", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
-		log.Fatalf("create contract client instance: %v", err)
+		return "", fmt.Errorf("create oracle contract client: %w", err)
 	}
+
 	chainID := big.NewInt(u.cfg.ChainID)
 	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
 	if err != nil {
-		log.Fatalf("failed to create keyed transactor: %v", err)
+		return "", fmt.Errorf("create keyed transactor: %w", err)
 	}
 
 	pendingNonce, err := u.ethClient.PendingNonceAt(context.Background(), trxOpts.From)
 	if err != nil {
-		log.Fatalf("failed to fetch pending nonce: %v", err)
+		return "", fmt.Errorf("fetch pending nonce: %w", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("suggest gas price: %w", err)
+	}
+	trxOpts.GasPrice = gasPrice
+	trxOpts.GasLimit = 300_000
 
 	pk := gnark.PublicKeyToOraclePublicKey(u.Account.PublicKey)
 	tx, err := bcClient.RegisterUser(trxOpts, *pk)
 	if err != nil {
-		log.Fatalf("call RegisterUser() function: %v", err)
+		return "", fmt.Errorf("call RegisterUser(): %w", err)
 	}
 
 	receipt, err := bind.WaitMined(context.Background(), u.ethClient, tx)
 	if err != nil {
-		log.Fatalf("failed to wait for transaction mining: %v", err)
+		return "", fmt.Errorf("wait for tx mined: %w", err)
 	}
-	if receipt.Status == 1 {
-		fmt.Printf("successfully registered user=%v\n", u.Name)
-	} else {
-		fmt.Printf("Transaction failed (user=%v\n)", u.Name)
+	if receipt.Status != 1 {
+		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
 
-	return nil
+	fmt.Printf("successfully registered user=%v (tx=%s)\n", u.Name, tx.Hash().Hex())
+	return tx.Hash().Hex(), nil
 }
 
 func (u *User) getLatestIPFSHashView() (string, error) {
@@ -255,9 +257,14 @@ func (u *User) BurnTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	// calculate the commitment hash:
-	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, credentialsBytes, credentialsHashBytes := CalculateCommitmentHash()
+	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash()
 
 	// burn the amount:
 	var commitmentHash [32]byte
@@ -283,8 +290,6 @@ func (u *User) BurnTx() error {
 	u.nullifierHashBytes = nullifierHashBytes[:]
 	u.secretBytes = secretBytes[:]
 	u.destinationIDBytes = destinationIDBytes[:]
-	u.credentialsBytes = credentialsBytes[:]
-	u.credentialsHashBytes = credentialsHashBytes[:]
 
 	u.GasCosts.BurnCost = receipt.GasUsed
 
@@ -324,57 +329,19 @@ func (u *User) WithdrawTx() error {
 		return fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
 	}
 
-	//////////////////////////////////////////SIGNATURE//////////////////////////////////////////////////////////
-	// Use fixed global issuerPrivateKey
-	msg := hash.MIMC_BN254.New()
-	msg.Write(u.credentialsBytes)
-	hashed := msg.Sum(nil)
-
-	Issuersignature, err := issuerPrivateKey.Sign(hashed, msg)
-	if err != nil {
-		return fmt.Errorf("failed to sign message: %v", err)
-	}
-
-	// Optional: Verify locally (for debug only)
-	issuerPublicKey.Verify(Issuersignature, hashed, msg)
-
-	var sig eddsa2.Signature
-	var pub eddsa2.PublicKey
-	sig.Assign(tedwards.BN254, Issuersignature)
-	pub.Assign(tedwards.BN254, issuerPublicKey.Bytes())
-
-	////////////////////////////////////////////////////////////////////////////////////////////////
-
-	var witness gnark.MerkleProofCircuit
-
-	witness.Issuer.Signature = sig
-	witness.Issuer.PublicKey = pub
+	var witness merkleproof.MerkleProofCircuit
 
 	witness.Nullifier = new(big.Int).SetBytes(u.nullifierBytes)
 	witness.Secret = new(big.Int).SetBytes(u.secretBytes)
 	witness.DestinationID = new(big.Int).SetBytes(u.destinationIDBytes)
-	witness.Credentials = new(big.Int).SetBytes(u.credentialsBytes)
 
 	witness.Leaf = proofIndex
-	// witness.CommitmentHash = u.commitmentHashBytes
 	witness.NullifierHash = u.nullifierHashBytes
-	witness.CredentialsHash = u.credentialsHashBytes
 	witness.M.RootHash = merkleRoot
 
-	witness.M.Path = make([]frontend.Variable, depth+1)
 	for i := 0; i < depth+1; i++ {
 		witness.M.Path[i] = frontend.Variable(new(big.Int).SetBytes(proofPath[i]))
 	}
-
-	///////////////////*** FOR PROOF OF NON-REVOCATION ***///////////////////
-	witness.RevocationLeaf = proofIndex
-	witness.RevocationProof.RootHash = merkleRoot
-
-	witness.RevocationProof.Path = make([]frontend.Variable, depth+1)
-	for i := 0; i < depth+1; i++ {
-		witness.RevocationProof.Path[i] = frontend.Variable(new(big.Int).SetBytes(proofPath[i]))
-	}
-	//////////////////////////////////////////////////////////////////////////////
 
 	// generate the proof
 	fullWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField())
@@ -387,10 +354,7 @@ func (u *User) WithdrawTx() error {
 	fmt.Printf("Secret: %x\n", witness.Secret)
 	fmt.Printf("DestinationID: %x\n", witness.DestinationID)
 	fmt.Printf("Leaf Index: %d\n", witness.Leaf)
-	// fmt.Printf("Commitment Hash: %x\n", witness.CommitmentHash)
 	fmt.Printf("Nullifier Hash: %x\n", witness.NullifierHash)
-	fmt.Printf("Credentials Hash: %x\n", witness.CredentialsHash)
-	fmt.Printf("Credentials: %x\n", witness.Credentials)
 	fmt.Printf("Merkle Root: %x\n", witness.M.RootHash)
 	for i, path := range witness.M.Path {
 		fmt.Printf("Merkle Path[%d]: %x\n", i, path)
@@ -426,6 +390,11 @@ func (u *User) WithdrawTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	var buf bytes.Buffer
 	_, err = proof.WriteTo(&buf)
@@ -462,16 +431,11 @@ func (u *User) WithdrawTx() error {
 	return nil
 }
 
-func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, credentialsBytes, credentialsHashBytes []byte) {
+func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {
 	hGo := hash.MIMC_BN254.New()
 	mod := ecc.BN254.ScalarField()
 	nullifier, _ := util.GenerateRandomBigInt32Bytes(mod)
 	secret, _ := util.GenerateRandomBigInt32Bytes(mod)
-	credintials, _ := util.GenerateRandomBigInt32Bytes(mod)
-
-	hGo.Reset()
-	hGo.Write(credintials.Bytes())
-	credentialsHash := hGo.Sum(nil)
 
 	mimcHash := hash.MIMC_BN254.New()
 	mimcHash.Reset()
@@ -480,7 +444,6 @@ func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHa
 	destinationID := new(big.Int)
 	destinationID.SetString("9636219578937187601590327046728695236698322465209974782280717458744997515735", 10)
 	mimcHash.Write(util.PadTo32Bytes(destinationID))
-	mimcHash.Write(util.PadTo32Bytes(credintials))
 	commitmentHash := mimcHash.Sum(nil)
 
 	hGo.Reset()
@@ -492,8 +455,6 @@ func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHa
 	nullifierHashBytes = []byte(nullifierHash)
 	secretBytes = []byte(util.PadTo32Bytes(secret))
 	destinationIDBytes = []byte(util.PadTo32Bytes(destinationID))
-	credentialsBytes = []byte(util.PadTo32Bytes(credintials))
-	credentialsHashBytes = []byte(credentialsHash)
 
-	return commitmentHash, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, credentialsBytes, credentialsHashBytes
+	return commitmentHash, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes
 }
