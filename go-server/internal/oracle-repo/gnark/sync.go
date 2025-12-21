@@ -28,8 +28,8 @@ type StateSync struct {
 	contract  *bc.Oracle
 }
 
-func NewStateSync(cfg *config.Config, wg *sync.WaitGroup, index uint64, state *State, ethClient *ethclient.Client, contract *bc.Oracle) *StateSync {
-	return &StateSync{cfg: cfg, wg: wg, index: index, state: state, ethClient: ethClient, contract: contract}
+func NewStateSync(cfg *config.Config, index uint64, state *State, ethClient *ethclient.Client, contract *bc.Oracle) *StateSync {
+	return &StateSync{cfg: cfg, index: index, state: state, ethClient: ethClient, contract: contract}
 }
 
 func (s *StateSync) Synchronize() error {

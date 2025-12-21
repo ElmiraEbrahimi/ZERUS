@@ -63,8 +63,8 @@ type Node struct {
 	BatchedWiVote *BatchedWiVote
 }
 
-func NewNode(cfg *config.Config, wg *sync.WaitGroup, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, oracle *Oracle, id uint, privateKey *eddsa.PrivateKey, offeredAmount uint, role uint, validatorAccounts []*gnark.Account) *Node {
-	n := &Node{cfg: cfg, wg: wg, ethClient: ethClient, Oracle: oracle, IPFSClient: ipfsClient, ID: id, Role: Validator}
+func NewNode(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, oracle *Oracle, id uint, privateKey *eddsa.PrivateKey, offeredAmount uint, role uint, validatorAccounts []*gnark.Account) *Node {
+	n := &Node{cfg: cfg, ethClient: ethClient, Oracle: oracle, IPFSClient: ipfsClient, ID: id, Role: Validator}
 
 	fmt.Printf("setting account for node (=%v)...\n", n.ID)
 	n.privateKey = privateKey
@@ -89,7 +89,7 @@ func NewNode(cfg *config.Config, wg *sync.WaitGroup, ethClient *ethclient.Client
 	}
 
 	fmt.Printf("setting stateSync for node (=%v)...\n", n.ID)
-	n.stateSync = gnark.NewStateSync(cfg, wg, uint64(id), state, ethClient, bcClient)
+	n.stateSync = gnark.NewStateSync(cfg, uint64(id), state, ethClient, bcClient)
 
 	ecdsaPrivateKey, err := crypto.HexToECDSA(n.cfg.NodesPK[n.ID])
 	if err != nil {
@@ -254,102 +254,95 @@ func (n *Node) Start() {
 			panic(fmt.Errorf("failed to sync state: %v", err))
 		}
 	}()
-	listnerQuit := make(chan struct{}, 1)
-	n.listenToBlockchainEvents(listnerQuit)
 
 	// register validator:
 	n.registerValidatorTx()
 
-	n.wg.Add(1)
-	go func() {
-		for e := range n.OracleMessages {
-			// ignore messages from self:
-			// if e.From == n.ID {
-			// 	continue
-			// }
+	// n.wg.Add(1)
+	// go func() {
+	// 	for e := range n.OracleMessages {
 
-			// message from oracle:
-			if e.From == OracleID {
-				if e.Title == MessageTitleTerminate {
-					fmt.Printf("node %d terminating...\n", n.ID)
-					/////////////////////////////////////////////////////
-					// if n.ID == 0 { // or if n.IsAggregator() or totalValidators-1
-					// //  or with setting in config n.ShouldWithdrawOnExit
+	// 		// message from oracle:
+	// 		if e.From == OracleID {
+	// 			if e.Title == MessageTitleTerminate {
+	// 				fmt.Printf("node %d terminating...\n", n.ID)
+	// 				/////////////////////////////////////////////////////
+	// 				// if n.ID == 0 { // or if n.IsAggregator() or totalValidators-1
+	// 				// //  or with setting in config n.ShouldWithdrawOnExit
 
-					// 	err := n.WithDrawAccounts([]*gnark.Account{n.Account}, n.state)
-					// 	if err != nil {
-					// 		fmt.Printf("node %d failed to withdraw: %v\n", n.ID, err)
-					// 	} else {
-					// 		fmt.Printf("node %d successfully withdrew before termination.\n", n.ID)
-					// 	}
-					// }
-					// /////////////////////////////////////////////////////
-					listnerQuit <- struct{}{}
-					n.wg.Done()
-					return
-				}
-				if e.Title == MessageTittleSelectWiVote && n.IsAggregator() {
-					fmt.Printf("aggregator (node=%d) is performing wiVote selection...\n", n.ID)
-					fmt.Printf("wivotes: %v\n", n.WiVotes)
-					if len(n.WiVotes) != 0 {
-						for uniqueReqID := range n.WiVotes {
-							// aggregator wiVote process:
-							err := n.AggregatorProcessWiVote(uniqueReqID)
-							if err != nil {
-								panic(fmt.Errorf("failed to process wiVote: %v", err))
-							}
+	// 				// 	err := n.WithDrawAccounts([]*gnark.Account{n.Account}, n.state)
+	// 				// 	if err != nil {
+	// 				// 		fmt.Printf("node %d failed to withdraw: %v\n", n.ID, err)
+	// 				// 	} else {
+	// 				// 		fmt.Printf("node %d successfully withdrew before termination.\n", n.ID)
+	// 				// 	}
+	// 				// }
+	// 				// /////////////////////////////////////////////////////
+	// 				n.wg.Done()
+	// 				return
+	// 			}
+	// 			if e.Title == MessageTittleSelectWiVote && n.IsAggregator() {
+	// 				fmt.Printf("aggregator (node=%d) is performing wiVote selection...\n", n.ID)
+	// 				fmt.Printf("wivotes: %v\n", n.WiVotes)
+	// 				if len(n.WiVotes) != 0 {
+	// 					for uniqueReqID := range n.WiVotes {
+	// 						// aggregator wiVote process:
+	// 						err := n.AggregatorProcessWiVote(uniqueReqID)
+	// 						if err != nil {
+	// 							panic(fmt.Errorf("failed to process wiVote: %v", err))
+	// 						}
 
-						}
-					}
+	// 					}
+	// 				}
 
-					// reset wivotes:
-					n.aggregatorResetWiVotes()
-				}
+	// 				// reset wivotes:
+	// 				n.aggregatorResetWiVotes()
+	// 			}
 
-				if e.Title == MessageTittleSelectIncVote && n.IsAggregator() {
-					fmt.Printf("aggregator (node %d) is performing incVote selection...\n", n.ID)
-					fmt.Printf("incvotes: %v\n", n.IncVotes)
-					selected := make([]*IncVote, 0)
-					for commitmentHashStr := range n.IncVotes {
-						selectedIncVote, err := n.AggregatorSelectVote(commitmentHashStr)
-						if err != nil {
-							fmt.Printf("failed to select incVote: %v\n", err)
-							continue
-						}
-						fmt.Printf("selected tree index is: %v\n", selectedIncVote.IncTreeIndex)
-						selected = append(selected, selectedIncVote)
-					}
-					if len(selected) != 0 {
-						// fetch and update ipfs:
-						if n.IPFSClient.LatestHash != "" {
-							fmt.Printf("fetching ipfs content... (node_id=%v)\n", n.ID)
-							n.IPFSContent = n.FetchIPFS()
-						}
-						for _, incVote := range selected {
-							n.IPFSContent.CommitmentHashIncVote[string(incVote.CommitmentHash)] = *incVote
-						}
-						n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
-						fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
-						latestIPFSHash, _ := n.UpdateIPFS()
-						n.updateLatestIPFSHashTx(latestIPFSHash)
-					}
-					n.aggregatorResetIncVotes()
-				}
-			}
+	// 			if e.Title == MessageTittleSelectIncVote && n.IsAggregator() {
+	// 				fmt.Printf("aggregator (node %d) is performing incVote selection...\n", n.ID)
+	// 				fmt.Printf("incvotes: %v\n", n.IncVotes)
+	// 				selected := make([]*IncVote, 0)
+	// 				for commitmentHashStr := range n.IncVotes {
+	// 					selectedIncVote, err := n.AggregatorSelectVote(commitmentHashStr)
+	// 					if err != nil {
+	// 						fmt.Printf("failed to select incVote: %v\n", err)
+	// 						continue
+	// 					}
+	// 					fmt.Printf("selected tree index is: %v\n", selectedIncVote.IncTreeIndex)
+	// 					selected = append(selected, selectedIncVote)
+	// 				}
+	// 				if len(selected) != 0 {
+	// 					// fetch and update ipfs:
+	// 					if n.IPFSClient.LatestHash != "" {
+	// 						fmt.Printf("fetching ipfs content... (node_id=%v)\n", n.ID)
+	// 						n.IPFSContent = n.FetchIPFS()
+	// 					}
+	// 					for _, incVote := range selected {
+	// 						n.IPFSContent.CommitmentHashIncVote[string(incVote.CommitmentHash)] = *incVote
+	// 					}
+	// 					n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
+	// 					fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
+	// 					latestIPFSHash, _ := n.UpdateIPFS()
+	// 					n.updateLatestIPFSHashTx(latestIPFSHash)
+	// 				}
+	// 				n.aggregatorResetIncVotes()
+	// 			}
+	// 		}
 
-			// message from other nodes:
-			if e.Title == MessageTittleWiVote && n.IsAggregator() {
-				fmt.Printf("aggregator (node %d) is collecting wiVote...\n", n.ID)
-				wiVote := e.Message.(*WiVote)
-				n.aggregatorCollectWiVote(wiVote)
-			}
-			if e.Title == MessageTittleIncVote && n.IsAggregator() {
-				fmt.Printf("aggregator (node %d) is collecting incVote...\n", n.ID)
-				incVote := e.Message.(*IncVote)
-				n.aggregatorCollectIncVote(incVote)
-			}
-		}
-	}()
+	// 		// message from other nodes:
+	// 		if e.Title == MessageTittleWiVote && n.IsAggregator() {
+	// 			fmt.Printf("aggregator (node %d) is collecting wiVote...\n", n.ID)
+	// 			wiVote := e.Message.(*WiVote)
+	// 			n.aggregatorCollectWiVote(wiVote)
+	// 		}
+	// 		if e.Title == MessageTittleIncVote && n.IsAggregator() {
+	// 			fmt.Printf("aggregator (node %d) is collecting incVote...\n", n.ID)
+	// 			incVote := e.Message.(*IncVote)
+	// 			n.aggregatorCollectIncVote(incVote)
+	// 		}
+	// 	}
+	// }()
 }
 
 func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error) {
@@ -532,45 +525,6 @@ func hashWiVoteFieldwise(wivote *WiVote) []byte {
 	return hfunc.Sum(nil)
 }
 
-// func hashBatchVoteFieldwise(index, batchCommitment, vote, roundID *big.Int) []byte {
-// 	hFunc := hash.MIMC_BN254.New()
-// 	hFunc.Reset()
-
-// 	var fe fr.Element
-
-// 	fe.SetBigInt(index)
-// 	hFunc.Write(fe.Marshal()[:])
-
-// 	fe.SetBigInt(batchCommitment)
-// 	hFunc.Write(fe.Marshal()[:])
-
-// 	fe.SetBigInt(vote)
-// 	hFunc.Write(fe.Marshal()[:])
-
-// 	fe.SetBigInt(roundID)
-// 	hFunc.Write(fe.Marshal()[:])
-
-// 	return hFunc.Sum(nil)
-// }
-
-// func marshalHash(Index *big.Int, RequestID *big.Int, IsApproved *big.Int) []byte {
-// 	hfunc := hash.MIMC_BN254.New()
-// 	hfunc.Reset()
-
-// 	var fe fr.Element
-
-// 	fe.SetBigInt(Index)
-// 	hfunc.Write(fe.Marshal()[:]) // feeds the field element in canonical form
-
-// 	fe.SetBigInt(RequestID)
-// 	hfunc.Write(fe.Marshal()[:])
-
-// 	fe.SetBigInt(IsApproved)
-// 	hfunc.Write(fe.Marshal()[:])
-
-// 	return hfunc.Sum(nil)
-// }
-
 // endregion
 
 // region contract
@@ -593,6 +547,11 @@ func (n *Node) selectNewAggregatorTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.ChooseNewAggregator(trxOpts)
 	if err != nil {
@@ -630,6 +589,11 @@ func (n *Node) registerValidatorTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	pk := gnark.PublicKeyToOraclePublicKey(n.Account.PublicKey)
 	tx, err := bcClient.RegisterValidator(trxOpts, big.NewInt(int64(n.ID)), *pk)
@@ -646,8 +610,6 @@ func (n *Node) registerValidatorTx() error {
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
-
-	n.Oracle.GasCosts.RegisterValidatorCost = receipt.GasUsed
 
 	return nil
 }
@@ -669,6 +631,11 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.UpdateLatestIPFSHash(trxOpts, latestIPFSHash)
 	if err != nil {
@@ -684,8 +651,6 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
-
-	n.Oracle.GasCosts.UpdateLatestIPFSHash = receipt.GasUsed
 
 	return nil
 }
@@ -707,6 +672,11 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.SubmitWiVote(
 		trxOpts,
@@ -734,8 +704,6 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
-
-	n.Oracle.GasCosts.SubmitWiVoteCost += receipt.GasUsed
 
 	return nil
 }
@@ -774,6 +742,11 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -807,7 +780,6 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 
 	if receipt.Status == 1 {
 		log.Printf("replace: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.ReplaceCost += receipt.GasUsed
 	} else {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -847,6 +819,11 @@ func (n *Node) ExitTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -873,7 +850,6 @@ func (n *Node) ExitTx() error {
 
 	if receipt.Status == 1 {
 		log.Printf("exit: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.ExitCost += receipt.GasUsed
 	} else {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -913,6 +889,11 @@ func (n *Node) WithdrawAccountTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("failed to suggest gas price: %v", err)
+	}
+	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -942,7 +923,6 @@ func (n *Node) WithdrawAccountTx() error {
 
 	if receipt.Status == 1 {
 		log.Printf("Withdrawn: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.WithdrawCost += receipt.GasUsed
 	} else {
 		log.Fatalf("withdraw tx reverted (index=%d)\n", account.Index.Uint64())
 	}

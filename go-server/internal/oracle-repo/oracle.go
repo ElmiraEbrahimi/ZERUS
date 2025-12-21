@@ -1,13 +1,13 @@
 package oracle
 
 import (
-	"encoding/csv"
 	"fmt"
 
+	merkleproof "l2alchemy/circuits/merkle_proof"
+	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
-	"l2alchemy/internal/oracle-repo/util"
 	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
@@ -23,11 +23,11 @@ type Oracle struct {
 	Nodes        map[uint]*Node `json:"nodes"`
 	AggregatorID uint           `json:"aggregator_id"`
 
-	IncCircuit *gnark.MerkleProofCircuit
+	IncCircuit *merkleproof.MerkleProofCircuit
 	IncR1CS    constraint.ConstraintSystem
 	IncVK      groth16.VerifyingKey
 
-	SparseCircuit *gnark.BatchingVotingCircuit
+	SparseCircuit *votingbatch.BatchingVotingCircuit
 	SparseR1CS    constraint.ConstraintSystem
 	SparsePK      groth16.ProvingKey
 	SparseVK      groth16.VerifyingKey
@@ -36,28 +36,7 @@ type Oracle struct {
 
 	messageLock sync.Mutex
 
-	GasCosts *GasCosts
-
-	CircuitMemTime         *CircuitMemTime
-	SparseMemTimeCSVWriter *csv.Writer
-
 	RoundID int
-}
-
-type GasCosts struct {
-	RegisterValidatorCost uint64
-	SubmitWiVoteCost      uint64
-	WithdrawCost          uint64
-	ReplaceCost           uint64
-	ExitCost              uint64
-	UpdateLatestIPFSHash  uint64
-}
-
-type CircuitMemTime struct {
-	SparseProvingTime        int
-	SparseProvingMemoryUsage int
-	SparseCompileMemory      int
-	SparseCompileTime        int
 }
 
 type InternalOraclelMessage struct {
@@ -78,30 +57,26 @@ const (
 
 func NewOracle(
 	cfg *config.Config,
-	wg *sync.WaitGroup,
 	ethClient *ethclient.Client,
 	ipfsClient *db.IPFSClient,
 	nodesCount int,
 
-	incCircuit *gnark.MerkleProofCircuit,
+	incCircuit *merkleproof.MerkleProofCircuit,
 	incR1cs constraint.ConstraintSystem,
 	incVk groth16.VerifyingKey,
 
-	sparseCircuit *gnark.BatchingVotingCircuit,
+	sparseCircuit *votingbatch.BatchingVotingCircuit,
 	sparseR1cs constraint.ConstraintSystem,
 	sparsePK groth16.ProvingKey,
 	sparseVK groth16.VerifyingKey,
 
 	privteKeys []*eddsa.PrivateKey,
 	accounts []*gnark.Account,
-	sparseCompileMem int,
-	sparseCompileTime int,
 
 ) *Oracle {
 
 	o := new(Oracle)
 	o.cfg = cfg
-	o.wg = wg
 	o.ethClient = ethClient
 
 	o.IncCircuit = incCircuit
@@ -117,20 +92,10 @@ func NewOracle(
 	nodes := make(map[uint]*Node, nodesCount)
 	for i := 0; i < nodesCount; i++ {
 		offeredAmount := 1000 // TODO: change initial validator balance / move to cfg
-		nodes[uint(i)] = NewNode(cfg, wg, ethClient, ipfsClient, o, uint(i), privteKeys[i], uint(offeredAmount), Validator, accounts)
+		nodes[uint(i)] = NewNode(cfg, ethClient, ipfsClient, o, uint(i), privteKeys[i], uint(offeredAmount), Validator, accounts)
 	}
 	o.Nodes = nodes
 	o.AggregatorID = 0
-
-	o.GasCosts = &GasCosts{}
-	o.CircuitMemTime = &CircuitMemTime{
-		SparseCompileMemory: sparseCompileMem,
-		SparseCompileTime:   sparseCompileTime,
-	}
-	o.SparseMemTimeCSVWriter = util.SetupCSVWriter(
-		fmt.Sprintf("data/n%d_b%d_aggregate.csv", cfg.NodeCount, cfg.BatchSize),
-		[]string{"nodeCount", "provingTime", "provingMemory", "compileMemory", "compileTime", "datetime"},
-	)
 
 	return o
 }
