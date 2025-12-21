@@ -8,17 +8,19 @@ import (
 	"time"
 
 	"l2alchemy/internal/eth"
+	"l2alchemy/internal/zkkeys"
 )
 
 // Handler aggregates dependencies for HTTP endpoints. It holds a reference to
 // the CounterClient used to service requests.
 type Handler struct {
 	counter *eth.CounterClient
+	zk      *zkkeys.Manager
 }
 
-// NewHandler constructs a new Handler with the given CounterClient.
-func NewHandler(counter *eth.CounterClient) *Handler {
-	return &Handler{counter: counter}
+// NewHandler constructs a new Handler with the given dependencies.
+func NewHandler(counter *eth.CounterClient, zk *zkkeys.Manager) *Handler {
+	return &Handler{counter: counter, zk: zk}
 }
 
 // counterResponse is the shape of responses returned from GET /counter.
@@ -56,6 +58,25 @@ func RegisterRoutes(mux *http.ServeMux, h *Handler) {
 			return
 		}
 		h.health(w, r)
+	})
+
+	// ZK key generation and status endpoints.
+	// POST /circuits/keygen triggers Groth16 setup and writes pk/vk for both circuits.
+	mux.HandleFunc("/circuits/keygen", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.generateCircuitKeys(w, r)
+	})
+
+	// GET /circuits/keys returns whether pk/vk exist on disk for each circuit.
+	mux.HandleFunc("/circuits/keys", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.circuitKeysStatus(w, r)
 	})
 }
 
@@ -108,4 +129,39 @@ func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"block_number": block,
 	})
+}
+
+type circuitKeysStatusResponse struct {
+	Circuits []zkkeys.KeyStatus `json:"circuits"`
+}
+
+type circuitKeyGenResponse struct {
+	Results []zkkeys.KeyGenResult `json:"results"`
+}
+
+// generateCircuitKeys handles POST /circuits/keygen.
+func (h *Handler) generateCircuitKeys(w http.ResponseWriter, r *http.Request) {
+	if h.zk == nil {
+		http.Error(w, "zk key manager not configured", http.StatusInternalServerError)
+		return
+	}
+	// These operations can be heavy; set a generous request timeout upstream if needed.
+	results, err := h.zk.GenerateAll()
+	if err != nil {
+		log.Printf("key generation failed: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(circuitKeyGenResponse{Results: results})
+}
+
+// circuitKeysStatus handles GET /circuits/keys.
+func (h *Handler) circuitKeysStatus(w http.ResponseWriter, r *http.Request) {
+	if h.zk == nil {
+		http.Error(w, "zk key manager not configured", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(circuitKeysStatusResponse{Circuits: h.zk.Status()})
 }
