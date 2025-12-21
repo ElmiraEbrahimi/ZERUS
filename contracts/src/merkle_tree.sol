@@ -21,8 +21,7 @@ contract MerkleTree {
 
         levels = _levels;
         console.log("MerkleTree initialized with levels =", levels);
-console.log("Max leaves = 2^levels =", 2 ** levels);
-
+        console.log("Max leaves = 2^levels =", 2 ** levels);
 
         for (uint32 i = 0; i < levels; i++) {
             filledSubtrees[i] = zeros(i);
@@ -41,11 +40,10 @@ console.log("Max leaves = 2^levels =", 2 ** levels);
         return MiMC.hash(input);
     }
 
-
     function insert(uint256 leaf) internal {
         console.log("Inserting new leaf. nextIndex =", nextIndex);
-console.log("Max capacity (2^levels) =", 2 ** levels);
-require(nextIndex != 2 ** levels, "tree is full");
+        console.log("Max capacity (2^levels) =", 2 ** levels);
+        require(nextIndex != 2 ** levels, "tree is full");
         require(nextIndex != 2 ** levels, "tree is full");
         uint256 left;
         uint256 right;
@@ -72,69 +70,65 @@ require(nextIndex != 2 ** levels, "tree is full");
     }
 
     function update(
-    uint256 leaf,
-    uint256[] memory path,
-    uint256 leafIndex,
-    uint256 depth
-) internal {
+        uint256 leaf,
+        uint256[] memory path,
+        uint256 leafIndex,
+        uint256 depth
+    ) internal {
+        // TODO: uncomment below:
+        // require(nextIndex == 2 ** levels, "tree not full");
 
-    // TODO: uncomment below:
-    // require(nextIndex == 2 ** levels, "tree not full");
+        // Call verify with leafIndex and depth
+        verify(path, leafIndex, depth); // TODO: remove and uncomment below:
+        // require(verify(path, leafIndex, depth), "leaf to update not included");
 
-    // Call verify with leafIndex and depth 
-    verify(path, leafIndex, depth);  // TODO: remove and uncomment below:
-    // require(verify(path, leafIndex, depth), "leaf to update not included");
+        path[0] = leaf;
 
-    path[0] = leaf;
-
-    // Call computeRootFromPath with leafIndex and depth 
-    root = computeRootFromPath(path, leafIndex, depth);
-}
-
-
- function verify(
-    uint256[] memory path,
-    uint256 leafIndex,
-    uint256 depth
-) public view returns (bool) {
-    uint256 computedHash = path[0]; // Start with the leaf itself
-
-    // Iterate through the Merkle proof path using binary representation of leafIndex
-    for (uint256 i = 1; i <= depth; i++) {
-        uint256 bit = (leafIndex >> (i - 1)) & 1; // Extract the i-th bit (LSB first)
-
-        if (bit == 1) {
-            computedHash = hashLeftRight(path[i], computedHash); // Right child
-        } else {
-            computedHash = hashLeftRight(computedHash, path[i]); // Left child
-        }
+        // Call computeRootFromPath with leafIndex and depth
+        root = computeRootFromPath(path, leafIndex, depth);
     }
 
-    return computedHash == root;
-}
+    function verify(
+        uint256[] memory path,
+        uint256 leafIndex,
+        uint256 depth
+    ) public view returns (bool) {
+        uint256 computedHash = path[0]; // Start with the leaf itself
 
+        // Iterate through the Merkle proof path using binary representation of leafIndex
+        for (uint256 i = 1; i <= depth; i++) {
+            uint256 bit = (leafIndex >> (i - 1)) & 1; // Extract the i-th bit (LSB first)
 
-function computeRootFromPath(
-    uint256[] memory path,
-    uint256 leafIndex,
-    uint256 depth
-) public pure returns (uint256) {
-    uint256 computedHash = path[0]; // Start with the leaf itself
-
-    // Iterate through the Merkle proof path using binary representation of leafIndex
-    for (uint256 i = 1; i <= depth; i++) {
-        uint256 bit = (leafIndex >> (i - 1)) & 1; // Extract the i-th bit (LSB first)
-
-        if (bit == 1) {
-            computedHash = hashLeftRight(path[i], computedHash); // Right child
-        } else {
-            computedHash = hashLeftRight(computedHash, path[i]); // Left child
+            if (bit == 1) {
+                computedHash = hashLeftRight(path[i], computedHash); // Right child
+            } else {
+                computedHash = hashLeftRight(computedHash, path[i]); // Left child
+            }
         }
+
+        return computedHash == root;
     }
 
-    return computedHash;
-}
+    function computeRootFromPath(
+        uint256[] memory path,
+        uint256 leafIndex,
+        uint256 depth
+    ) public pure returns (uint256) {
+        uint256 computedHash = path[0]; // Start with the leaf itself
 
+        // Iterate through the Merkle proof path using binary representation of leafIndex
+        for (uint256 i = 1; i <= depth; i++) {
+            uint256 bit = (leafIndex >> (i - 1)) & 1; // Extract the i-th bit (LSB first)
+
+            if (bit == 1) {
+                computedHash = hashLeftRight(path[i], computedHash); // Right child
+            } else {
+                computedHash = hashLeftRight(computedHash, path[i]); // Left child
+            }
+        }
+
+        return computedHash;
+    }
 
     function getRoot() public view returns (uint256) {
         return root;
