@@ -40,10 +40,11 @@ func main() {
 	handler := servers.NewHandler(counterClient, zkMgr)
 	mux := http.NewServeMux()
 	servers.RegisterRoutes(mux, handler)
+	rootHandler := servers.WithRequestLogging(mux)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPBindAddr,
-		Handler: mux,
+		Handler: rootHandler,
 	}
 
 	go func() {
