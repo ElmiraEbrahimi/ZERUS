@@ -2,7 +2,6 @@
 server:
 	cd go-server && go run ./cmd/server
 
-
 .PHONY: zksync
 zksync:
 	@echo "Starting zkSync local stack via start.sh..."
@@ -193,3 +192,13 @@ deploy-merkle-tree:
 	  --out go-server/internal/eth/merkle_tree_abigen.go
 	@echo "Regenerated go-server/internal/eth/merkle_tree_abigen.go"
 	@echo "MerkleTree deployment + ABI regeneration complete."
+
+# Utils:
+
+.PHONY: zip
+zip:
+	@TIMESTAMP=$$(date +"%Y%m%d_%H%M%S"); \
+	zip -r archive_$$TIMESTAMP.zip . \
+		-x ".git/*" \
+		-x "go-server/build/*" \
+		-x "*.zip"

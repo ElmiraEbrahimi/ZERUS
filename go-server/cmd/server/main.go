@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
 	servers "l2alchemy/internal/server"
-
-	"github.com/joho/godotenv"
+	"l2alchemy/internal/zkkeys"
 )
 
 func main() {
@@ -22,24 +22,22 @@ func main() {
 	// Supported run modes:
 	//   - from repo root:       go run ./go-server/cmd/server
 	//   - from go-server/:      go run ./cmd/server
-	if err := godotenv.Load(".env"); err != nil {
-		if err2 := godotenv.Load("../.env"); err2 != nil {
-			log.Printf("no .env file found or unable to load it: %v", err2)
-		}
-	}
 
-	cfg, err := config.Load()
+	printEnvValues := true
+	cfg, err := config.Load(printEnvValues)
 	if err != nil {
 		log.Fatalf("unable to load configuration: %v", err)
 	}
 
 	ctx := context.Background()
-	counterClient, err := eth.NewCounterClient(ctx, cfg.RPCURL, cfg.ChainID, cfg.PrivateKey, cfg.ContractAddress)
+	counterClient, err := eth.NewCounterClient(ctx, cfg.RPCURL, cfg.ChainID, cfg.PrivateKey, cfg.CounterContractAddress)
 	if err != nil {
 		log.Fatalf("failed to initialise counter client: %v", err)
 	}
 
-	handler := servers.NewHandler(counterClient)
+	keyDir := resolveKeyDir()
+	zkMgr := zkkeys.New(keyDir)
+	handler := servers.NewHandler(counterClient, zkMgr)
 	mux := http.NewServeMux()
 	servers.RegisterRoutes(mux, handler)
 
@@ -49,7 +47,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("starting counter API on %s", cfg.HTTPBindAddr)
+		log.Printf("starting server on %s", cfg.HTTPBindAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen error: %v", err)
 		}
@@ -58,10 +56,25 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
-	log.Println("shutting down counter API")
+	log.Println("shutting down server")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("error during shutdown: %v", err)
 	}
+}
+
+// resolveKeyDir returns a stable folder for pk/vk files, regardless of whether
+// the binary is started from repo root or from within go-server/.
+func resolveKeyDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return filepath.Join("build", "keys")
+	}
+	// If started from repo root, prefer go-server/build/keys.
+	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
+		return filepath.Join(wd, "go-server", "build", "keys")
+	}
+	// Otherwise assume current working dir is go-server/.
+	return filepath.Join(wd, "build", "keys")
 }

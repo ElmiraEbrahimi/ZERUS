@@ -13,10 +13,10 @@ RUN go mod download
 COPY . .
 
 # Build the server binary. Disable cgo to simplify the runtime image.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /counter-api ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /server ./cmd/server
 
 FROM alpine:latest
 WORKDIR /app
-COPY --from=builder /counter-api .
+COPY --from=builder /server .
 EXPOSE 8080
-ENTRYPOINT ["/counter-api"]
+ENTRYPOINT ["/server"]

@@ -302,30 +302,6 @@ contract Oracle is MerkleTree {
 
     // region 5.exit
 
-    // function slash(
-    //     uint256 postStateRoot,
-    //     uint256 uniqueID,
-    //     uint256 batchCommitment,
-    //     uint256 slasherAggIndex,
-    //     // uint256 slashedValIndex,
-    //     uint256[8] memory proof
-    // ) public {
-    //     require(wiVotes[uniqueID] != 0, "pending request");
-
-    //     uint[6] memory input = [
-    //         postStateRoot,
-    //         uniqueID,
-    //         batchCommitment,
-    //         uint256(wiVotes[uniqueID]),
-    //         slasherAggIndex
-    //         // slashedValIndex
-    //     ];
-
-    //     setRoot(postStateRoot);
-    //     console.log("successfully slashed");
-    //     emit Slashed(0);
-    // }
-
     function replace(
         PublicKey memory publicKey,
         Account memory toReplace,
