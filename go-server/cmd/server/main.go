@@ -12,10 +12,12 @@ import (
 
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
-
-	// "l2alchemy/internal/oracle_runtime"
-	servers "l2alchemy/internal/server"
+	"l2alchemy/internal/oracle_runtime"
+	"l2alchemy/internal/oracle_runtime/events"
+	"l2alchemy/internal/server/handlers"
 	"l2alchemy/internal/zkkeys"
+
+	servers "l2alchemy/internal/server"
 )
 
 func main() {
@@ -34,20 +36,27 @@ func main() {
 	ctx := context.Background()
 	counterClient, err := eth.NewCounterClient(ctx, cfg.RPCURL, cfg.ChainID, cfg.PrivateKey, cfg.CounterContractAddress)
 	if err != nil {
-		log.Fatalf("failed to initialise counter client: %v", err)
+		log.Fatalf("failed to initialize counter client: %v", err)
 	}
-
-	// oracleEngine, err := oracle_runtime.Init(cfg)
-	// if err != nil {
-	// 	log.Fatalf("failed to initialise oracle runtime: %v", err)
-	// }
-	// log.Printf("oracle runtime ready: state=%s users=%d", len(oracleEngine.Users))
 
 	keyDir := resolveKeyDir()
 	zkMgr := zkkeys.New(keyDir)
-	handler := servers.NewHandler(counterClient, zkMgr)
-	mux := http.NewServeMux()
-	servers.RegisterRoutes(mux, handler)
+	engine, err := oracle_runtime.Init(cfg, keyDir)
+	if err != nil {
+		log.Fatalf("failed to initialize oracle runtime: %v", err)
+	}
+	log.Printf("oracle runtime ready!")
+
+	l2Subscriber, err := events.NewL2ContractEventSubscriber(engine)
+	if err != nil {
+		log.Fatalf("failed to initialize l2 contract event subscriber: %v", err)
+	}
+	l2Subscriber.Start(context.Background())
+
+	counterHandler := handlers.NewCounterHandler(counterClient)
+	zkHandler := handlers.NewZKHandler(zkMgr)
+	oracleHandler := handlers.NewOracleHandler(engine)
+	mux := servers.NewRouter(counterHandler, zkHandler, oracleHandler)
 	rootHandler := servers.WithRequestLogging(mux)
 
 	srv := &http.Server{
@@ -66,6 +75,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	log.Println("shutting down server")
+	l2Subscriber.Stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
