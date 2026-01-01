@@ -326,6 +326,24 @@ func (n *Node) aggregatorResetWiVotes() {
 	n.WiVotes = make(map[string]map[uint]*WiVote)
 }
 
+func (n *Node) nodeByAccountIndex(index *big.Int) (*Node, error) {
+	if n == nil || n.Oracle == nil {
+		return nil, fmt.Errorf("oracle not initialized")
+	}
+	if index == nil {
+		return nil, fmt.Errorf("account index is nil")
+	}
+	for _, node := range n.Oracle.Nodes {
+		if node == nil || node.Account == nil || node.Account.Index == nil {
+			continue
+		}
+		if node.Account.Index.Cmp(index) == 0 {
+			return node, nil
+		}
+	}
+	return nil, fmt.Errorf("node not found for account index %s", index.String())
+}
+
 func (n *Node) resetBatchedWiVotes() {
 	for _, node := range n.Oracle.Nodes {
 		node.BatchedWiVote.WithdrawalReqIDs = make([]*big.Int, 0)
@@ -501,7 +519,10 @@ func (n *Node) AggregatorProcessWiVote(uniqueReqID string) error {
 		return fmt.Errorf("failed to select wiVote: %v", err)
 	}
 	for _, v := range voteSlice {
-		node := n.Oracle.Nodes[uint(v.Index.Uint64())]
+		node, err := n.nodeByAccountIndex(v.Index)
+		if err != nil {
+			return err
+		}
 		fmt.Println("adding wivote to the bached wivote of the node:", node.ID)
 		node.BatchedWiVote.Index = v.Index
 		node.BatchedWiVote.WithdrawalReqIDs = append(node.BatchedWiVote.WithdrawalReqIDs, v.RequestID)
@@ -686,7 +707,10 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	for i, vote := range voteSlice {
 
 		// 1. Find the node who signed this vote
-		node := n.Oracle.Nodes[uint(vote.Index.Uint64())]
+		node, err := n.nodeByAccountIndex(vote.Index)
+		if err != nil {
+			return nil, err
+		}
 
 		// 2. Rebuild the original message that was signed
 		// hfunc.Reset()
@@ -721,8 +745,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		var publicKey eddsa2.PublicKey
 		var signature eddsa2.Signature
 
-		// make sure use the node public key
-		publicKey.Assign(tedwards.BN254, node.privateKey.PublicKey.Bytes())
+		publicKey.Assign(tedwards.BN254, validatorAccount.PublicKey.Bytes())
 		signature.Assign(tedwards.BN254, vote.Signature)
 
 		fmt.Printf("**************Validator [%d] index: %d **********\n", i, validatorAccount.Index.Uint64())
