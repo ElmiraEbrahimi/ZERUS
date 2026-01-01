@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"runtime"
 	"sort"
-	"strconv"
+	"strings"
 	"sync"
-	"time"
 
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
@@ -33,8 +31,11 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/algebra/native/twistededwards"
 	eddsa2 "github.com/consensys/gnark/std/signature/eddsa"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -103,7 +104,9 @@ func NewNode(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 	fmt.Printf("setting stateSync for node (=%v)...\n", n.ID)
 	n.stateSync = gnark.NewStateSync(cfg, uint64(id), state, ethClient, bcClient)
 
-	ecdsaPrivateKey, err := crypto.HexToECDSA(n.cfg.NodesPK[n.ID])
+	pk := strings.TrimPrefix(n.cfg.NodePK, "0x")
+	pk = strings.TrimPrefix(pk, "0X")
+	ecdsaPrivateKey, err := crypto.HexToECDSA(pk)
 	if err != nil {
 		log.Fatalf("failed to parseecdsaPrivateKey: %v", err)
 	}
@@ -849,41 +852,10 @@ func (n *Node) processBatchedWiVotes() (*big.Int, error) {
 		return nil, fmt.Errorf("create witness: %w", err)
 	}
 
-	var m1, m2 runtime.MemStats
-
-	runtime.GC()
-	runtime.ReadMemStats(&m1)
-	start := time.Now()
 	p, err := groth16.Prove(n.Oracle.SparseR1CS, n.Oracle.SparsePK, witness)
 	if err != nil {
 		return nil, fmt.Errorf("prove: %v", err)
 	}
-	runtime.ReadMemStats(&m2)
-	provingTime := time.Since(start)
-
-	// flush to csv:
-
-	data := [][]string{{
-		strconv.Itoa(int(n.cfg.NodeCount)),
-		strconv.Itoa(int(provingTime.Milliseconds())),
-		//strconv.Itoa(int(util.BToMb(m2.TotalAlloc - m1.TotalAlloc))),
-
-		strconv.Itoa(
-			int(util.BToMb(m2.TotalAlloc-m1.TotalAlloc)) + n.Oracle.CircuitMemTime.SparseCompileMemory,
-		),
-
-		strconv.Itoa(n.Oracle.CircuitMemTime.SparseCompileMemory),
-		strconv.Itoa(n.Oracle.CircuitMemTime.SparseCompileTime),
-		time.Now().Format("2006-01-02 15:04:05"),
-	}}
-
-	for _, row := range data {
-		err = n.Oracle.SparseMemTimeCSVWriter.Write(row)
-		if err != nil {
-			return nil, fmt.Errorf("failed writing gas data: %v", err)
-		}
-	}
-	// n.Oracle.SparseMemTimeCSVWriter.Flush()
 
 	pw, err := witness.Public()
 	if err != nil {
@@ -1088,11 +1060,60 @@ func (n *Node) RegisterValidatorTx() error {
 		fmt.Printf("successfully registered validator node=%v\n", n.ID)
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
+	revertReason, callErr := n.revertReason(context.Background(), tx, receipt.BlockNumber)
+	if revertReason != "" {
+		return fmt.Errorf("register validator failed (node=%v tx=%s revert=%s)", n.ID, tx.Hash().Hex(), revertReason)
+	}
+	if callErr != "" {
+		return fmt.Errorf("register validator failed (node=%v tx=%s call_err=%s)", n.ID, tx.Hash().Hex(), callErr)
+	}
+	return fmt.Errorf("register validator failed (node=%v tx=%s)", n.ID, tx.Hash().Hex())
 	}
 
-	n.Oracle.GasCosts.RegisterValidatorCost = receipt.GasUsed
-
 	return nil
+}
+
+func (n *Node) revertReason(ctx context.Context, tx *types.Transaction, blockNumber *big.Int) (string, string) {
+	if n == nil || n.ethClient == nil || tx == nil {
+		return "", ""
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	to := tx.To()
+	if to == nil {
+		return "", ""
+	}
+
+	if n.ecdsaPrivateKey == nil {
+		return "", ""
+	}
+
+	msg := ethereum.CallMsg{
+		From:  crypto.PubkeyToAddress(n.ecdsaPrivateKey.PublicKey),
+		To:    to,
+		Gas:   tx.Gas(),
+		Value: tx.Value(),
+		Data:  tx.Data(),
+	}
+
+	switch tx.Type() {
+	case types.LegacyTxType, types.AccessListTxType:
+		msg.GasPrice = tx.GasPrice()
+	case types.DynamicFeeTxType:
+		msg.GasFeeCap = tx.GasFeeCap()
+		msg.GasTipCap = tx.GasTipCap()
+	}
+
+	data, err := n.ethClient.CallContract(ctx, msg, blockNumber)
+	if err != nil && len(data) == 0 {
+		return "", err.Error()
+	}
+	reason, err := abi.UnpackRevert(data)
+	if err != nil {
+		return "", ""
+	}
+	return reason, ""
 }
 
 func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
@@ -1126,8 +1147,6 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
-
-	n.Oracle.GasCosts.UpdateLatestIPFSHash = receipt.GasUsed
 
 	return nil
 }
@@ -1176,8 +1195,6 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
-
-	n.Oracle.GasCosts.SubmitWiVoteCost += receipt.GasUsed
 
 	return nil
 }
@@ -1245,7 +1262,6 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 
 	if receipt.Status == 1 {
 		log.Printf("replace: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.ReplaceCost += receipt.GasUsed
 	} else {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1310,7 +1326,6 @@ func (n *Node) ExitTx() error {
 
 	if receipt.Status == 1 {
 		log.Printf("exit: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.ExitCost += receipt.GasUsed
 	} else {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1372,12 +1387,10 @@ func (n *Node) WithdrawAccountTx() error {
 		log.Fatalf("failed to wait for withdraw tx (index=%d): %v", account.Index.Uint64(), err)
 	}
 	log.Printf("✅ Account index=%d | balance=%s | Withdraw gas used: %d\n", account.Index.Uint64(), account.Balance.String(), receipt.GasUsed)
-	log.Printf(" Saving to Oracle.GasCosts.WithdrawCost = %d\n", receipt.GasUsed)
 	log.Printf("DEBUG: Withdrawal receipt status: %d\n", receipt.Status)
 
 	if receipt.Status == 1 {
 		log.Printf("Withdrawn: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
-		n.Oracle.GasCosts.WithdrawCost += receipt.GasUsed
 	} else {
 		log.Fatalf("withdraw tx reverted (index=%d)\n", account.Index.Uint64())
 	}

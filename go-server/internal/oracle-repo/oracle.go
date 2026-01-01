@@ -1,7 +1,6 @@
 package oracle
 
 import (
-	"encoding/csv"
 	"fmt"
 	merkleproof "l2alchemy/circuits/merkle_proof"
 	votingbatch "l2alchemy/circuits/voting_batch"
@@ -36,22 +35,7 @@ type Oracle struct {
 
 	messageLock sync.Mutex
 
-	GasCosts *GasCosts
-
-	CircuitMemTime         *CircuitMemTime
-	SparseMemTimeCSVWriter *csv.Writer
-
 	RoundID int
-}
-
-type GasCosts struct {
-	RegisterValidatorCost uint64
-	SubmitWiVoteCost      uint64
-	WithdrawCost          uint64
-
-	ReplaceCost          uint64
-	ExitCost             uint64
-	UpdateLatestIPFSHash uint64
 }
 
 type CircuitMemTime struct {

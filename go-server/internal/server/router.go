@@ -74,5 +74,14 @@ func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *ha
 			}
 			oracle.RegisterDefaultUser(w, r)
 		})
+
+		// POST /validators/register registers all validator nodes on-chain.
+		mux.HandleFunc("/validators/register", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.RegisterValidators(w, r)
+		})
 	}
 }

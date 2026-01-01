@@ -36,7 +36,7 @@ type Config struct {
 	OracleSeedX string   `env:"ORACLE_SEED_X,required"`
 	OracleSeedY string   `env:"ORACLE_SEED_Y,required"`
 	UserPK      string   `env:"USER_PK,required"`
-	NodesPK     []string `env:"NODES_PK,required"`
+	NodePK      string   `env:"NODE_PK,required"`
 
 	ChainID                 int64 `env:"ZKSYNC_CHAIN_ID,required"`
 	OracleLevels            int   `env:"ORACLE_LEVELS,required"`
@@ -170,7 +170,7 @@ func setValue(field reflect.Value, key, raw string) error {
 		}
 
 		// Parse comma-separated list
-		// Example: NODES_PK=pk1,pk2,pk3
+		// Example: LIST_ENV=val1,val2,val3
 		parts := strings.Split(raw, ",")
 		out := make([]string, 0, len(parts))
 		for _, p := range parts {

@@ -25,6 +25,11 @@ type registerUserResponse struct {
 	TxHash string `json:"tx_hash"`
 }
 
+type registerValidatorsResponse struct {
+	NodeIDs []uint `json:"node_ids"`
+	Count   int    `json:"count"`
+}
+
 // RegisterDefaultUser handles POST /users/default/register by calling
 // RegisterUserTx for the user named "default-user".
 func (h *OracleHandler) RegisterDefaultUser(w http.ResponseWriter, r *http.Request) {
@@ -53,4 +58,30 @@ func (h *OracleHandler) RegisterDefaultUser(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(registerUserResponse{User: usr.Name, TxHash: txHash})
+}
+
+// RegisterValidators handles POST /validators/register by registering all
+// validator nodes in the oracle runtime.
+func (h *OracleHandler) RegisterValidators(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil || h.engine.Oracle == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	oracle := h.engine.Oracle
+	nodeIDs := make([]uint, 0, len(oracle.Nodes))
+	for id, node := range oracle.Nodes {
+		if node == nil {
+			continue
+		}
+		if err := node.RegisterValidatorTx(); err != nil {
+			log.Printf("register validator %d failed: %v", id, err)
+			http.Error(w, "failed to register validators", http.StatusInternalServerError)
+			return
+		}
+		nodeIDs = append(nodeIDs, id)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(registerValidatorsResponse{NodeIDs: nodeIDs, Count: len(nodeIDs)})
 }

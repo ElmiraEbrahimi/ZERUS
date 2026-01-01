@@ -139,11 +139,6 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 	)
 	usrPtr := &usr
 
-	// register nodes:
-	for _, n := range oracle.Nodes {
-		n.RegisterValidatorTx()
-	}
-
 	engine := &OracleEngine{
 		Users:         map[string]*user.User{usrPtr.Name: usrPtr},
 		Cfg:           cfg,
