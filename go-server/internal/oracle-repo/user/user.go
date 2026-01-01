@@ -211,6 +211,13 @@ func (u *User) RegisterUserTx() (string, error) {
 		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
 
+	effectiveGasPrice := receipt.EffectiveGasPrice
+	if effectiveGasPrice == nil {
+		effectiveGasPrice = tx.GasPrice()
+	}
+	gasCostWei := new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveGasPrice)
+	fmt.Printf("user register tx: hash=%s gasUsed=%d gasPrice=%s gasCost=%s wei\n", tx.Hash().Hex(), receipt.GasUsed, effectiveGasPrice.String(), gasCostWei.String())
+
 	fmt.Printf("successfully registered user=%v (tx=%s)\n", u.Name, tx.Hash().Hex())
 	return tx.Hash().Hex(), nil
 }
