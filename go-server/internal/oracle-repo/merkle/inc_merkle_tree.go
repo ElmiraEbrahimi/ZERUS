@@ -2,8 +2,8 @@ package merkle
 
 import (
 	"fmt"
-	"math/big"
 	"l2alchemy/internal/oracle-repo/util"
+	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/hash"
@@ -35,7 +35,7 @@ func GenerateZeroValues(depth int) ([][]byte, error) {
 
 	zeroValues := make([][]byte, depth)
 	initialZeroValue := new(big.Int)
-	initialZeroValue.SetString("20019762671335178393512154978075455201849332419823879662510519485824706883752", 10) 
+	initialZeroValue.SetString("20019762671335178393512154978075455201849332419823879662510519485824706883752", 10)
 	initialZeroValue.Mod(initialZeroValue, mod)
 
 	zeroValues[0] = util.PadTo32Bytes(initialZeroValue)

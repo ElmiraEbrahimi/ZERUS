@@ -75,15 +75,9 @@ contract MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) internal {
-        // TODO: uncomment below:
-        // require(nextIndex == 2 ** levels, "tree not full");
-
         // Call verify with leafIndex and depth
-        verify(path, leafIndex, depth); // TODO: remove and uncomment below:
-        // require(verify(path, leafIndex, depth), "leaf to update not included");
-
+        verify(path, leafIndex, depth);
         path[0] = leaf;
-
         // Call computeRootFromPath with leafIndex and depth
         root = computeRootFromPath(path, leafIndex, depth);
     }

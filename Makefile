@@ -27,7 +27,9 @@ deploy: deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy
 deploy-counter:
 	@echo "Deploying Counter via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
-	  forge script script/DeployCounter.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" --broadcast 2>&1 | tee /tmp/forge_deploy.log
+	  forge script script/DeployCounter.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
+	    2>&1 | tee /tmp/forge_deploy.log
 
 	@addr=$$(awk '/Counter deployed at/ {print $$4}' /tmp/forge_deploy.log | tail -n1); \
 	if [ -z "$$addr" ]; then \
@@ -64,7 +66,9 @@ gnark-merkle-verifier:
 deploy-merkle-verifier: gnark-merkle-verifier
 	@echo "Deploying MerkleProofVerifier via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
-	  forge script script/DeployMerkleProofVerifier.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" --broadcast 2>&1 | tee /tmp/forge_merkle_deploy.log
+	  forge script script/DeployMerkleProofVerifier.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
+	    2>&1 | tee /tmp/forge_merkle_deploy.log
 
 	@addr=$$(awk '/MerkleProofVerifier deployed at/ {print $$NF}' /tmp/forge_merkle_deploy.log | tail -n1); \
 	if [ -z "$$addr" ]; then \
@@ -100,7 +104,8 @@ deploy-votingbatch-verifier: gnark-votingbatch-verifier
 	@echo "Deploying VotingBatchVerifier via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployVotingBatchVerifier.s.sol \
-	    --zksync --rpc-url "$$ZKSYNC_RPC_URL" --broadcast 2>&1 | tee /tmp/forge_votingbatch_deploy.log
+	    --zksync --rpc-url "$$ZKSYNC_RPC_URL" --private-key "$$ZKSYNC_PRIVATE_KEY" \
+	    --suppress-warnings assemblycreate --broadcast 2>&1 | tee /tmp/forge_votingbatch_deploy.log
 
 	@addr=$$(awk '/VotingBatchVerifier deployed at/ {print $$NF}' /tmp/forge_votingbatch_deploy.log | tail -n1); \
 	if [ -z "$$addr" ]; then \
@@ -132,7 +137,8 @@ deploy-votingbatch-verifier: gnark-votingbatch-verifier
 deploy-oracle:
 	@echo "Deploying Oracle via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
-	  forge script script/DeployOracle.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" --broadcast \
+	  forge script script/DeployOracle.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_oracle_deploy.log
 
 	@addr=$$(awk '/Oracle deployed at/ {print $$4}' /tmp/forge_oracle_deploy.log | tail -n1); \
@@ -164,7 +170,9 @@ deploy-oracle:
 deploy-merkle-tree:
 	@echo "Deploying MerkleTree via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
-	  forge script script/DeployMerkleTree.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" --broadcast 2>&1 | tee /tmp/forge_merkle_tree_deploy.log
+	  forge script script/DeployMerkleTree.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
+	    2>&1 | tee /tmp/forge_merkle_tree_deploy.log
 
 	@addr=$$(awk '/MerkleTree deployed at/ {print $$NF}' /tmp/forge_merkle_tree_deploy.log | tail -n1); \
 	if [ -z "$$addr" ]; then \

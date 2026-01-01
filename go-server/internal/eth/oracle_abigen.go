@@ -31,11 +31,9 @@ var (
 
 // OracleAccount is an auto generated low-level Go binding around an user-defined struct.
 type OracleAccount struct {
-	Index         *big.Int
-	PubKey        OraclePublicKey
-	Balance       *big.Int
-	Reputation    *big.Int
-	SeverityCount *big.Int
+	Index   *big.Int
+	PubKey  OraclePublicKey
+	Balance *big.Int
 }
 
 // OraclePublicKey is an auto generated low-level Go binding around an user-defined struct.
@@ -46,7 +44,7 @@ type OraclePublicKey struct {
 
 // OracleMetaData contains all meta data concerning the Oracle contract.
 var OracleMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"_levels\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"_seedX\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"_seedY\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"votingVerifierAddress\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"AGGREGATOR_REWARD\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"INIT_REPUTATION\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"INIT_SEVERITY_COUNT\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"VALIDATOR_REWARD\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"ZERO_VALUE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"burn\",\"inputs\":[{\"name\":\"commitmentHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"chooseNewAggregator\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"claim\",\"inputs\":[{\"name\":\"proof\",\"type\":\"bytes\",\"internalType\":\"bytes\"},{\"name\":\"publicWitness\",\"type\":\"bytes\",\"internalType\":\"bytes\"},{\"name\":\"nullifierHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"computeRootFromPath\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"exit\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"getAggregator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLevels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getNextLeafIndex\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getReward\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoot\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getSeed\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"hashAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"hashLeftRight\",\"inputs\":[{\"name\":\"left\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"right\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"levels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerUser\",\"inputs\":[{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"registerValidator\",\"inputs\":[{\"name\":\"validatorID\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"replace\",\"inputs\":[{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"toReplace\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"submitWiVote\",\"inputs\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"uniqueReqID\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"batchCommitment\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"validatorBits\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"vote\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postStateRoot\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postSeedX\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postSeedY\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"updateLatestIPFSHash\",\"inputs\":[{\"name\":\"ipfsHash\",\"type\":\"string\",\"internalType\":\"string\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"verify\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"viewBalance\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"viewLatestIPFSHash\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"string\",\"internalType\":\"string\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"withdraw\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"zeros\",\"inputs\":[{\"name\":\"i\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"event\",\"name\":\"BurnSubmitted\",\"inputs\":[{\"name\":\"commitmentHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ClaimSubmitted\",\"inputs\":[{\"name\":\"uniqueID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"proof\",\"type\":\"bytes\",\"indexed\":false,\"internalType\":\"bytes\"},{\"name\":\"publicWitness\",\"type\":\"bytes\",\"indexed\":false,\"internalType\":\"bytes\"},{\"name\":\"nullifierHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Exiting\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"NewAggregator\",\"inputs\":[{\"name\":\"validatorID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Registered\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"value\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Replaced\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"replaced\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"UserRegistered\",\"inputs\":[{\"name\":\"addr\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ValidatorRegistered\",\"inputs\":[{\"name\":\"addr\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"validatorID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"reputation\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"severityCount\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"WiVoteSubmitted\",\"inputs\":[{\"name\":\"submitter\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"validators\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"request\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Withdrawn\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"_levels\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"_seedX\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"_seedY\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"votingVerifierAddress\",\"type\":\"address\",\"internalType\":\"address\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"AGGREGATOR_REWARD\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"VALIDATOR_REWARD\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"ZERO_VALUE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"burn\",\"inputs\":[{\"name\":\"commitmentHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"chooseNewAggregator\",\"inputs\":[],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"claim\",\"inputs\":[{\"name\":\"proof\",\"type\":\"bytes\",\"internalType\":\"bytes\"},{\"name\":\"publicWitness\",\"type\":\"bytes\",\"internalType\":\"bytes\"},{\"name\":\"nullifierHash\",\"type\":\"bytes32\",\"internalType\":\"bytes32\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"computeRootFromPath\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"exit\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"getAggregator\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getLevels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getNextLeafIndex\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getReward\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoot\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getSeed\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"hashAccount\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"hashLeftRight\",\"inputs\":[{\"name\":\"left\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"right\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"levels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"registerUser\",\"inputs\":[{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"registerValidator\",\"inputs\":[{\"name\":\"validatorID\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"replace\",\"inputs\":[{\"name\":\"publicKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"toReplace\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"payable\"},{\"type\":\"function\",\"name\":\"submitWiVote\",\"inputs\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"uniqueReqID\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"batchCommitment\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"validatorBits\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"honestBits\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"vote\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postStateRoot\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postSeedX\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"postSeedY\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"updateLatestIPFSHash\",\"inputs\":[{\"name\":\"ipfsHash\",\"type\":\"string\",\"internalType\":\"string\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"verify\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"viewBalance\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"viewLatestIPFSHash\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"string\",\"internalType\":\"string\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"withdraw\",\"inputs\":[{\"name\":\"account\",\"type\":\"tuple\",\"internalType\":\"structOracle.Account\",\"components\":[{\"name\":\"index\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"pubKey\",\"type\":\"tuple\",\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"zeros\",\"inputs\":[{\"name\":\"i\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"event\",\"name\":\"BurnSubmitted\",\"inputs\":[{\"name\":\"commitmentHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ClaimSubmitted\",\"inputs\":[{\"name\":\"uniqueID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"proof\",\"type\":\"bytes\",\"indexed\":false,\"internalType\":\"bytes\"},{\"name\":\"publicWitness\",\"type\":\"bytes\",\"indexed\":false,\"internalType\":\"bytes\"},{\"name\":\"nullifierHash\",\"type\":\"bytes32\",\"indexed\":false,\"internalType\":\"bytes32\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Exiting\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"NewAggregator\",\"inputs\":[{\"name\":\"validatorID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Registered\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"value\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Replaced\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"},{\"name\":\"replaced\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"UserRegistered\",\"inputs\":[{\"name\":\"addr\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"ValidatorRegistered\",\"inputs\":[{\"name\":\"addr\",\"type\":\"address\",\"indexed\":false,\"internalType\":\"address\"},{\"name\":\"validatorID\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"index\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"pubkey\",\"type\":\"tuple\",\"indexed\":false,\"internalType\":\"structOracle.PublicKey\",\"components\":[{\"name\":\"x\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"y\",\"type\":\"uint256\",\"internalType\":\"uint256\"}]},{\"name\":\"balance\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"WiVoteSubmitted\",\"inputs\":[{\"name\":\"submitter\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"validators\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"honestBits\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"request\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"},{\"name\":\"majorityVote\",\"type\":\"uint256\",\"indexed\":false,\"internalType\":\"uint256\"}],\"anonymous\":false},{\"type\":\"event\",\"name\":\"Withdrawn\",\"inputs\":[{\"name\":\"sender\",\"type\":\"address\",\"indexed\":true,\"internalType\":\"address\"}],\"anonymous\":false}]",
 }
 
 // OracleABI is the input ABI used to generate the binding from.
@@ -224,68 +222,6 @@ func (_Oracle *OracleSession) AGGREGATORREWARD() (*big.Int, error) {
 // Solidity: function AGGREGATOR_REWARD() view returns(uint256)
 func (_Oracle *OracleCallerSession) AGGREGATORREWARD() (*big.Int, error) {
 	return _Oracle.Contract.AGGREGATORREWARD(&_Oracle.CallOpts)
-}
-
-// INITREPUTATION is a free data retrieval call binding the contract method 0x1841fc8a.
-//
-// Solidity: function INIT_REPUTATION() view returns(uint256)
-func (_Oracle *OracleCaller) INITREPUTATION(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
-	err := _Oracle.contract.Call(opts, &out, "INIT_REPUTATION")
-
-	if err != nil {
-		return *new(*big.Int), err
-	}
-
-	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
-
-	return out0, err
-
-}
-
-// INITREPUTATION is a free data retrieval call binding the contract method 0x1841fc8a.
-//
-// Solidity: function INIT_REPUTATION() view returns(uint256)
-func (_Oracle *OracleSession) INITREPUTATION() (*big.Int, error) {
-	return _Oracle.Contract.INITREPUTATION(&_Oracle.CallOpts)
-}
-
-// INITREPUTATION is a free data retrieval call binding the contract method 0x1841fc8a.
-//
-// Solidity: function INIT_REPUTATION() view returns(uint256)
-func (_Oracle *OracleCallerSession) INITREPUTATION() (*big.Int, error) {
-	return _Oracle.Contract.INITREPUTATION(&_Oracle.CallOpts)
-}
-
-// INITSEVERITYCOUNT is a free data retrieval call binding the contract method 0xb4833819.
-//
-// Solidity: function INIT_SEVERITY_COUNT() view returns(uint256)
-func (_Oracle *OracleCaller) INITSEVERITYCOUNT(opts *bind.CallOpts) (*big.Int, error) {
-	var out []interface{}
-	err := _Oracle.contract.Call(opts, &out, "INIT_SEVERITY_COUNT")
-
-	if err != nil {
-		return *new(*big.Int), err
-	}
-
-	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
-
-	return out0, err
-
-}
-
-// INITSEVERITYCOUNT is a free data retrieval call binding the contract method 0xb4833819.
-//
-// Solidity: function INIT_SEVERITY_COUNT() view returns(uint256)
-func (_Oracle *OracleSession) INITSEVERITYCOUNT() (*big.Int, error) {
-	return _Oracle.Contract.INITSEVERITYCOUNT(&_Oracle.CallOpts)
-}
-
-// INITSEVERITYCOUNT is a free data retrieval call binding the contract method 0xb4833819.
-//
-// Solidity: function INIT_SEVERITY_COUNT() view returns(uint256)
-func (_Oracle *OracleCallerSession) INITSEVERITYCOUNT() (*big.Int, error) {
-	return _Oracle.Contract.INITSEVERITYCOUNT(&_Oracle.CallOpts)
 }
 
 // VALIDATORREWARD is a free data retrieval call binding the contract method 0xa3c3cda0.
@@ -568,9 +504,9 @@ func (_Oracle *OracleCallerSession) GetSeed() (*big.Int, *big.Int, error) {
 	return _Oracle.Contract.GetSeed(&_Oracle.CallOpts)
 }
 
-// HashAccount is a free data retrieval call binding the contract method 0xa41e5663.
+// HashAccount is a free data retrieval call binding the contract method 0xea368cff.
 //
-// Solidity: function hashAccount((uint256,(uint256,uint256),uint256,uint256,uint256) account) pure returns(uint256)
+// Solidity: function hashAccount((uint256,(uint256,uint256),uint256) account) pure returns(uint256)
 func (_Oracle *OracleCaller) HashAccount(opts *bind.CallOpts, account OracleAccount) (*big.Int, error) {
 	var out []interface{}
 	err := _Oracle.contract.Call(opts, &out, "hashAccount", account)
@@ -585,16 +521,16 @@ func (_Oracle *OracleCaller) HashAccount(opts *bind.CallOpts, account OracleAcco
 
 }
 
-// HashAccount is a free data retrieval call binding the contract method 0xa41e5663.
+// HashAccount is a free data retrieval call binding the contract method 0xea368cff.
 //
-// Solidity: function hashAccount((uint256,(uint256,uint256),uint256,uint256,uint256) account) pure returns(uint256)
+// Solidity: function hashAccount((uint256,(uint256,uint256),uint256) account) pure returns(uint256)
 func (_Oracle *OracleSession) HashAccount(account OracleAccount) (*big.Int, error) {
 	return _Oracle.Contract.HashAccount(&_Oracle.CallOpts, account)
 }
 
-// HashAccount is a free data retrieval call binding the contract method 0xa41e5663.
+// HashAccount is a free data retrieval call binding the contract method 0xea368cff.
 //
-// Solidity: function hashAccount((uint256,(uint256,uint256),uint256,uint256,uint256) account) pure returns(uint256)
+// Solidity: function hashAccount((uint256,(uint256,uint256),uint256) account) pure returns(uint256)
 func (_Oracle *OracleCallerSession) HashAccount(account OracleAccount) (*big.Int, error) {
 	return _Oracle.Contract.HashAccount(&_Oracle.CallOpts, account)
 }
@@ -849,23 +785,23 @@ func (_Oracle *OracleTransactorSession) Claim(proof []byte, publicWitness []byte
 	return _Oracle.Contract.Claim(&_Oracle.TransactOpts, proof, publicWitness, nullifierHash)
 }
 
-// Exit is a paid mutator transaction binding the contract method 0xbb721077.
+// Exit is a paid mutator transaction binding the contract method 0x4c5a04f4.
 //
-// Solidity: function exit((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function exit((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleTransactor) Exit(opts *bind.TransactOpts, account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.contract.Transact(opts, "exit", account, path, leafIndex, depth)
 }
 
-// Exit is a paid mutator transaction binding the contract method 0xbb721077.
+// Exit is a paid mutator transaction binding the contract method 0x4c5a04f4.
 //
-// Solidity: function exit((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function exit((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleSession) Exit(account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Exit(&_Oracle.TransactOpts, account, path, leafIndex, depth)
 }
 
-// Exit is a paid mutator transaction binding the contract method 0xbb721077.
+// Exit is a paid mutator transaction binding the contract method 0x4c5a04f4.
 //
-// Solidity: function exit((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function exit((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleTransactorSession) Exit(account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Exit(&_Oracle.TransactOpts, account, path, leafIndex, depth)
 }
@@ -912,46 +848,46 @@ func (_Oracle *OracleTransactorSession) RegisterValidator(validatorID *big.Int, 
 	return _Oracle.Contract.RegisterValidator(&_Oracle.TransactOpts, validatorID, publicKey)
 }
 
-// Replace is a paid mutator transaction binding the contract method 0xb7ae34fa.
+// Replace is a paid mutator transaction binding the contract method 0x622f2400.
 //
-// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256,uint256,uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
+// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
 func (_Oracle *OracleTransactor) Replace(opts *bind.TransactOpts, publicKey OraclePublicKey, toReplace OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.contract.Transact(opts, "replace", publicKey, toReplace, path, leafIndex, depth)
 }
 
-// Replace is a paid mutator transaction binding the contract method 0xb7ae34fa.
+// Replace is a paid mutator transaction binding the contract method 0x622f2400.
 //
-// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256,uint256,uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
+// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
 func (_Oracle *OracleSession) Replace(publicKey OraclePublicKey, toReplace OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Replace(&_Oracle.TransactOpts, publicKey, toReplace, path, leafIndex, depth)
 }
 
-// Replace is a paid mutator transaction binding the contract method 0xb7ae34fa.
+// Replace is a paid mutator transaction binding the contract method 0x622f2400.
 //
-// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256,uint256,uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
+// Solidity: function replace((uint256,uint256) publicKey, (uint256,(uint256,uint256),uint256) toReplace, uint256[] path, uint256 leafIndex, uint256 depth) payable returns()
 func (_Oracle *OracleTransactorSession) Replace(publicKey OraclePublicKey, toReplace OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Replace(&_Oracle.TransactOpts, publicKey, toReplace, path, leafIndex, depth)
 }
 
-// SubmitWiVote is a paid mutator transaction binding the contract method 0x66d8a585.
+// SubmitWiVote is a paid mutator transaction binding the contract method 0xdbc1dd69.
 //
-// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
-func (_Oracle *OracleTransactor) SubmitWiVote(opts *bind.TransactOpts, index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
-	return _Oracle.contract.Transact(opts, "submitWiVote", index, uniqueReqID, batchCommitment, validatorBits, vote, postStateRoot, postSeedX, postSeedY, proof)
+// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 honestBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
+func (_Oracle *OracleTransactor) SubmitWiVote(opts *bind.TransactOpts, index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, honestBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
+	return _Oracle.contract.Transact(opts, "submitWiVote", index, uniqueReqID, batchCommitment, validatorBits, honestBits, vote, postStateRoot, postSeedX, postSeedY, proof)
 }
 
-// SubmitWiVote is a paid mutator transaction binding the contract method 0x66d8a585.
+// SubmitWiVote is a paid mutator transaction binding the contract method 0xdbc1dd69.
 //
-// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
-func (_Oracle *OracleSession) SubmitWiVote(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
-	return _Oracle.Contract.SubmitWiVote(&_Oracle.TransactOpts, index, uniqueReqID, batchCommitment, validatorBits, vote, postStateRoot, postSeedX, postSeedY, proof)
+// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 honestBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
+func (_Oracle *OracleSession) SubmitWiVote(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, honestBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
+	return _Oracle.Contract.SubmitWiVote(&_Oracle.TransactOpts, index, uniqueReqID, batchCommitment, validatorBits, honestBits, vote, postStateRoot, postSeedX, postSeedY, proof)
 }
 
-// SubmitWiVote is a paid mutator transaction binding the contract method 0x66d8a585.
+// SubmitWiVote is a paid mutator transaction binding the contract method 0xdbc1dd69.
 //
-// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
-func (_Oracle *OracleTransactorSession) SubmitWiVote(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
-	return _Oracle.Contract.SubmitWiVote(&_Oracle.TransactOpts, index, uniqueReqID, batchCommitment, validatorBits, vote, postStateRoot, postSeedX, postSeedY, proof)
+// Solidity: function submitWiVote(uint256 index, uint256 uniqueReqID, uint256 batchCommitment, uint256 validatorBits, uint256 honestBits, uint256 vote, uint256 postStateRoot, uint256 postSeedX, uint256 postSeedY, uint256[8] proof) returns()
+func (_Oracle *OracleTransactorSession) SubmitWiVote(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, honestBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) (*types.Transaction, error) {
+	return _Oracle.Contract.SubmitWiVote(&_Oracle.TransactOpts, index, uniqueReqID, batchCommitment, validatorBits, honestBits, vote, postStateRoot, postSeedX, postSeedY, proof)
 }
 
 // UpdateLatestIPFSHash is a paid mutator transaction binding the contract method 0x2baa855a.
@@ -975,23 +911,23 @@ func (_Oracle *OracleTransactorSession) UpdateLatestIPFSHash(ipfsHash string) (*
 	return _Oracle.Contract.UpdateLatestIPFSHash(&_Oracle.TransactOpts, ipfsHash)
 }
 
-// Withdraw is a paid mutator transaction binding the contract method 0x29d97587.
+// Withdraw is a paid mutator transaction binding the contract method 0x0218350a.
 //
-// Solidity: function withdraw((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function withdraw((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleTransactor) Withdraw(opts *bind.TransactOpts, account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.contract.Transact(opts, "withdraw", account, path, leafIndex, depth)
 }
 
-// Withdraw is a paid mutator transaction binding the contract method 0x29d97587.
+// Withdraw is a paid mutator transaction binding the contract method 0x0218350a.
 //
-// Solidity: function withdraw((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function withdraw((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleSession) Withdraw(account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Withdraw(&_Oracle.TransactOpts, account, path, leafIndex, depth)
 }
 
-// Withdraw is a paid mutator transaction binding the contract method 0x29d97587.
+// Withdraw is a paid mutator transaction binding the contract method 0x0218350a.
 //
-// Solidity: function withdraw((uint256,(uint256,uint256),uint256,uint256,uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
+// Solidity: function withdraw((uint256,(uint256,uint256),uint256) account, uint256[] path, uint256 leafIndex, uint256 depth) returns()
 func (_Oracle *OracleTransactorSession) Withdraw(account OracleAccount, path []*big.Int, leafIndex *big.Int, depth *big.Int) (*types.Transaction, error) {
 	return _Oracle.Contract.Withdraw(&_Oracle.TransactOpts, account, path, leafIndex, depth)
 }
@@ -1614,18 +1550,16 @@ func (it *OracleRegisteredIterator) Close() error {
 
 // OracleRegistered represents a Registered event raised by the Oracle contract.
 type OracleRegistered struct {
-	Sender        common.Address
-	Index         *big.Int
-	Pubkey        OraclePublicKey
-	Value         *big.Int
-	Reputation    *big.Int
-	SeverityCount *big.Int
-	Raw           types.Log // Blockchain specific contextual infos
+	Sender common.Address
+	Index  *big.Int
+	Pubkey OraclePublicKey
+	Value  *big.Int
+	Raw    types.Log // Blockchain specific contextual infos
 }
 
-// FilterRegistered is a free log retrieval operation binding the contract event 0xd289bf719a2497922ac6fbfb0fb5e4fa8d2f01adf631e74293db86554aa4cfed.
+// FilterRegistered is a free log retrieval operation binding the contract event 0x195cbf3e686960cbbd84ae23e6bd39c44cf97ba7b9f1fbe6b06a84b2a7d7757c.
 //
-// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value, uint256 reputation, uint256 severityCount)
+// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value)
 func (_Oracle *OracleFilterer) FilterRegistered(opts *bind.FilterOpts) (*OracleRegisteredIterator, error) {
 
 	logs, sub, err := _Oracle.contract.FilterLogs(opts, "Registered")
@@ -1635,9 +1569,9 @@ func (_Oracle *OracleFilterer) FilterRegistered(opts *bind.FilterOpts) (*OracleR
 	return &OracleRegisteredIterator{contract: _Oracle.contract, event: "Registered", logs: logs, sub: sub}, nil
 }
 
-// WatchRegistered is a free log subscription operation binding the contract event 0xd289bf719a2497922ac6fbfb0fb5e4fa8d2f01adf631e74293db86554aa4cfed.
+// WatchRegistered is a free log subscription operation binding the contract event 0x195cbf3e686960cbbd84ae23e6bd39c44cf97ba7b9f1fbe6b06a84b2a7d7757c.
 //
-// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value, uint256 reputation, uint256 severityCount)
+// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value)
 func (_Oracle *OracleFilterer) WatchRegistered(opts *bind.WatchOpts, sink chan<- *OracleRegistered) (event.Subscription, error) {
 
 	logs, sub, err := _Oracle.contract.WatchLogs(opts, "Registered")
@@ -1672,9 +1606,9 @@ func (_Oracle *OracleFilterer) WatchRegistered(opts *bind.WatchOpts, sink chan<-
 	}), nil
 }
 
-// ParseRegistered is a log parse operation binding the contract event 0xd289bf719a2497922ac6fbfb0fb5e4fa8d2f01adf631e74293db86554aa4cfed.
+// ParseRegistered is a log parse operation binding the contract event 0x195cbf3e686960cbbd84ae23e6bd39c44cf97ba7b9f1fbe6b06a84b2a7d7757c.
 //
-// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value, uint256 reputation, uint256 severityCount)
+// Solidity: event Registered(address sender, uint256 index, (uint256,uint256) pubkey, uint256 value)
 func (_Oracle *OracleFilterer) ParseRegistered(log types.Log) (*OracleRegistered, error) {
 	event := new(OracleRegistered)
 	if err := _Oracle.contract.UnpackLog(event, "Registered", log); err != nil {
@@ -2043,19 +1977,17 @@ func (it *OracleValidatorRegisteredIterator) Close() error {
 
 // OracleValidatorRegistered represents a ValidatorRegistered event raised by the Oracle contract.
 type OracleValidatorRegistered struct {
-	Addr          common.Address
-	ValidatorID   *big.Int
-	Index         *big.Int
-	Pubkey        OraclePublicKey
-	Balance       *big.Int
-	Reputation    *big.Int
-	SeverityCount *big.Int
-	Raw           types.Log // Blockchain specific contextual infos
+	Addr        common.Address
+	ValidatorID *big.Int
+	Index       *big.Int
+	Pubkey      OraclePublicKey
+	Balance     *big.Int
+	Raw         types.Log // Blockchain specific contextual infos
 }
 
-// FilterValidatorRegistered is a free log retrieval operation binding the contract event 0x96b197eee034862ad9ee0ac3cf8a34814073ea538dc07fae4ae48b2ef5cde356.
+// FilterValidatorRegistered is a free log retrieval operation binding the contract event 0xab98958ae468add4aa956316226e8db683a814ddc402eede01b06d5786d43011.
 //
-// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance, uint256 reputation, uint256 severityCount)
+// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance)
 func (_Oracle *OracleFilterer) FilterValidatorRegistered(opts *bind.FilterOpts) (*OracleValidatorRegisteredIterator, error) {
 
 	logs, sub, err := _Oracle.contract.FilterLogs(opts, "ValidatorRegistered")
@@ -2065,9 +1997,9 @@ func (_Oracle *OracleFilterer) FilterValidatorRegistered(opts *bind.FilterOpts) 
 	return &OracleValidatorRegisteredIterator{contract: _Oracle.contract, event: "ValidatorRegistered", logs: logs, sub: sub}, nil
 }
 
-// WatchValidatorRegistered is a free log subscription operation binding the contract event 0x96b197eee034862ad9ee0ac3cf8a34814073ea538dc07fae4ae48b2ef5cde356.
+// WatchValidatorRegistered is a free log subscription operation binding the contract event 0xab98958ae468add4aa956316226e8db683a814ddc402eede01b06d5786d43011.
 //
-// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance, uint256 reputation, uint256 severityCount)
+// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance)
 func (_Oracle *OracleFilterer) WatchValidatorRegistered(opts *bind.WatchOpts, sink chan<- *OracleValidatorRegistered) (event.Subscription, error) {
 
 	logs, sub, err := _Oracle.contract.WatchLogs(opts, "ValidatorRegistered")
@@ -2102,9 +2034,9 @@ func (_Oracle *OracleFilterer) WatchValidatorRegistered(opts *bind.WatchOpts, si
 	}), nil
 }
 
-// ParseValidatorRegistered is a log parse operation binding the contract event 0x96b197eee034862ad9ee0ac3cf8a34814073ea538dc07fae4ae48b2ef5cde356.
+// ParseValidatorRegistered is a log parse operation binding the contract event 0xab98958ae468add4aa956316226e8db683a814ddc402eede01b06d5786d43011.
 //
-// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance, uint256 reputation, uint256 severityCount)
+// Solidity: event ValidatorRegistered(address addr, uint256 validatorID, uint256 index, (uint256,uint256) pubkey, uint256 balance)
 func (_Oracle *OracleFilterer) ParseValidatorRegistered(log types.Log) (*OracleValidatorRegistered, error) {
 	event := new(OracleValidatorRegistered)
 	if err := _Oracle.contract.UnpackLog(event, "ValidatorRegistered", log); err != nil {
@@ -2183,15 +2115,17 @@ func (it *OracleWiVoteSubmittedIterator) Close() error {
 
 // OracleWiVoteSubmitted represents a WiVoteSubmitted event raised by the Oracle contract.
 type OracleWiVoteSubmitted struct {
-	Submitter  *big.Int
-	Validators *big.Int
-	Request    *big.Int
-	Raw        types.Log // Blockchain specific contextual infos
+	Submitter    *big.Int
+	Validators   *big.Int
+	HonestBits   *big.Int
+	Request      *big.Int
+	MajorityVote *big.Int
+	Raw          types.Log // Blockchain specific contextual infos
 }
 
-// FilterWiVoteSubmitted is a free log retrieval operation binding the contract event 0xac5df3dcbb0ab759ad66164dd8325bf4518e18c42c023e0cb300f8241dfa6093.
+// FilterWiVoteSubmitted is a free log retrieval operation binding the contract event 0x73f336750f8104b46b6917b76a289163d6ceb486db25df9b8b71c5316ee064dd.
 //
-// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 request)
+// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 honestBits, uint256 request, uint256 majorityVote)
 func (_Oracle *OracleFilterer) FilterWiVoteSubmitted(opts *bind.FilterOpts) (*OracleWiVoteSubmittedIterator, error) {
 
 	logs, sub, err := _Oracle.contract.FilterLogs(opts, "WiVoteSubmitted")
@@ -2201,9 +2135,9 @@ func (_Oracle *OracleFilterer) FilterWiVoteSubmitted(opts *bind.FilterOpts) (*Or
 	return &OracleWiVoteSubmittedIterator{contract: _Oracle.contract, event: "WiVoteSubmitted", logs: logs, sub: sub}, nil
 }
 
-// WatchWiVoteSubmitted is a free log subscription operation binding the contract event 0xac5df3dcbb0ab759ad66164dd8325bf4518e18c42c023e0cb300f8241dfa6093.
+// WatchWiVoteSubmitted is a free log subscription operation binding the contract event 0x73f336750f8104b46b6917b76a289163d6ceb486db25df9b8b71c5316ee064dd.
 //
-// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 request)
+// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 honestBits, uint256 request, uint256 majorityVote)
 func (_Oracle *OracleFilterer) WatchWiVoteSubmitted(opts *bind.WatchOpts, sink chan<- *OracleWiVoteSubmitted) (event.Subscription, error) {
 
 	logs, sub, err := _Oracle.contract.WatchLogs(opts, "WiVoteSubmitted")
@@ -2238,9 +2172,9 @@ func (_Oracle *OracleFilterer) WatchWiVoteSubmitted(opts *bind.WatchOpts, sink c
 	}), nil
 }
 
-// ParseWiVoteSubmitted is a log parse operation binding the contract event 0xac5df3dcbb0ab759ad66164dd8325bf4518e18c42c023e0cb300f8241dfa6093.
+// ParseWiVoteSubmitted is a log parse operation binding the contract event 0x73f336750f8104b46b6917b76a289163d6ceb486db25df9b8b71c5316ee064dd.
 //
-// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 request)
+// Solidity: event WiVoteSubmitted(uint256 submitter, uint256 validators, uint256 honestBits, uint256 request, uint256 majorityVote)
 func (_Oracle *OracleFilterer) ParseWiVoteSubmitted(log types.Log) (*OracleWiVoteSubmitted, error) {
 	event := new(OracleWiVoteSubmitted)
 	if err := _Oracle.contract.UnpackLog(event, "WiVoteSubmitted", log); err != nil {

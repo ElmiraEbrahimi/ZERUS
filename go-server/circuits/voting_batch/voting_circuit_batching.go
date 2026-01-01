@@ -12,26 +12,25 @@ import (
 )
 
 const (
-	NumValidators   = 4 // could be 4, 8, 16, 32, 64, 128, 256.
-	MerkleTreeDepth = 3 // could be 2, 3,4,5,6,7,8
-	BatchSize       = 5 // could be 1, 5, 10, 15, 25, etc.
+	NumValidators   = 4
+	MerkleTreeDepth = 2
+	BatchSize       = 1 // could be 1, 5, 10, 15, 25, etc.
 
 	RewardAggregator = 500000000000000
 	RewardValidator  = 20000000000
-	// Severity            = 0
-	// ReputationIncrement = 2 // Reputation increase per correct vote
+
 	cost1 = 1
 )
 
 type BatchingVotingCircuit struct {
 	ResultingStateRoot frontend.Variable `gnark:",public"`
 	//*** RoundID, BatchCommitment, WithdrawalReqIDs are newly added ***
-	RoundID         frontend.Variable `gnark:",public"` // Public round index
-	BatchCommitment frontend.Variable `gnark:",public"` // Commitment hash of private WithdrawalReqIDs
-	MajorityVote    frontend.Variable `gnark:",public"` // Decimal value of a BatchSize-bit vote bitmask
-	ValidatorBits   frontend.Variable `gnark:",public"`
-	// WithdrawalReqIDs   [BatchSize]frontend.Variable //  Private input: request IDs being signed by validators
-	WithdrawalReqIDs [BatchSize]frontend.Variable // Slice
+	RoundID          frontend.Variable   `gnark:",public"` // Public round index
+	BatchCommitment  frontend.Variable   `gnark:",public"` // Commitment hash of private WithdrawalReqIDs
+	MajorityVote     frontend.Variable   `gnark:",public"` // Decimal value of a BatchSize-bit vote bitmask
+	ValidatorBits    frontend.Variable   `gnark:",public"`
+	HonestBits       frontend.Variable   `gnark:",public"`
+	WithdrawalReqIDs []frontend.Variable // Slice
 	Aggregator       BatchingAggregatorConstraints
 	Validators       [NumValidators]BatchingValidatorConstraints
 }
@@ -43,8 +42,6 @@ type BatchingAggregatorConstraints struct {
 	SecretKey   frontend.Variable
 	Balance     frontend.Variable
 	MerkleProof MerkleProofW
-	// Reputation    frontend.Variable
-	// SeverityCount frontend.Variable
 }
 
 type BatchingValidatorConstraints struct {
@@ -54,8 +51,7 @@ type BatchingValidatorConstraints struct {
 	MerkleProof MerkleProofW
 	Signature   eddsa.Signature
 	Vote        frontend.Variable // Validator's decision as decimal of a bitmask for b=5 vote 31 means 11111
-	// Reputation    frontend.Variable
-	// SeverityCount frontend.Variable
+
 }
 
 func powbatching(api frontend.API, x frontend.Variable, y frontend.Variable) frontend.Variable {
@@ -93,8 +89,8 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	}
 
 	// Ensure unique validator IDs
-	for i := 0; i < NumValidators; i++ {
-		for j := 0; j < NumValidators; j++ {
+	for i := 0; i < len(c.Validators); i++ {
+		for j := 0; j < len(c.Validators); j++ {
 			if i == j {
 				continue
 			}
@@ -136,9 +132,6 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	hFunc.Write(aggregatorPubKey.X)
 	hFunc.Write(aggregatorPubKey.Y)
 	hFunc.Write(c.Aggregator.Balance)
-	// change here
-	// hFunc.Write(c.Aggregator.Reputation)
-	// hFunc.Write(c.Aggregator.SeverityCount)
 
 	api.Println("[batching_out]  Aggregator MerkleProof Root:", c.Aggregator.MerkleProof.RootHash)
 	api.Println("[batching_out]  Aggregator MerkleProof Path[0]:", c.Aggregator.MerkleProof.Path[0])
@@ -154,21 +147,18 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	hFunc.Write(aggregatorPubKey.X)
 	hFunc.Write(aggregatorPubKey.Y)
 	hFunc.Write(api.Add(c.Aggregator.Balance, RewardAggregator))
-	// hFunc.Write(api.Add(c.Aggregator.Reputation, ReputationIncrement))
-	// hFunc.Write(api.Add(c.Aggregator.SeverityCount, Severity))
 	c.Aggregator.MerkleProof.Path[0] = hFunc.Sum()
 
 	hFunc.Reset()
 	intermediateRoot := c.Aggregator.MerkleProof.ComputeRootFromPath(api, hFunc, c.Aggregator.Index)
-	api.Println("[batching_circuit] Aggregator computed root hash:", intermediateRoot)
+	api.Println("[circuit] Aggregator computed root hash:", intermediateRoot)
 	/////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	// for checking the aggregator majorityvote correctness
-	// Majority counters (for votes 0 and 1)
-	count0 := frontend.Variable(0)
-	count1 := frontend.Variable(0)
+	majorityCount := frontend.Variable(0)
 
 	validatorBits := frontend.Variable(0)
+	honestBits := frontend.Variable(0)
 
 	// Process validators
 	for _, validator := range c.Validators {
@@ -187,8 +177,6 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		hFunc.Write(validator.PublicKey.A.X)
 		hFunc.Write(validator.PublicKey.A.Y)
 		hFunc.Write(validator.Balance)
-		// hFunc.Write(validator.Reputation)
-		// hFunc.Write(validator.SeverityCount)
 
 		api.Println("[batching_circuit] Validator LeafHash  Index", validator.Index)
 		api.Println("[batching_circuit] Validator LeafHash  PubKey.X", validator.PublicKey.A.X)
@@ -223,13 +211,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// NEW PART here we can add if the assertion fails punish the validator
 		// api.AssertIsEqual(c.MajorityVote, validator.Vote)
 
-		// Majority counting
-		isZeroVote := api.IsZero(validator.Vote)
-		isOneVote := api.Sub(cost1, isZeroVote)
-
-		count0 = api.Add(count0, isZeroVote)
-		count1 = api.Add(count1, isOneVote)
-
+		/////////////////////////THIS PART IS CORRECT/////////////////////////////
 		// diff = validator.Vote - MajorityVote
 		diff := api.Sub(validator.Vote, c.MajorityVote)
 
@@ -237,22 +219,26 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		isHonest := api.IsZero(diff)  // 1 if diff==0 else 0
 		api.AssertIsBoolean(isHonest) // safety
 
-		// honest gets +RewardValidator, dishonest gets 0 (full slash)
+		// honest gets +RewardValidator, dishonest gets 0
 		rewardedBalance := api.Add(validator.Balance, RewardValidator)
-		zeroBalance := api.Sub(validator.Balance, validator.Balance) // 0
+		zeroBalance := api.Sub(validator.Balance, validator.Balance)
 
 		// newBalance = isHonest ? rewardedBalance : 0
 		newBalance := api.Select(isHonest, rewardedBalance, zeroBalance)
+		//////////////////////////////////////////////////////
+		// Majority counting
+		// isHonest = 1 if vote == majority, else 0
 
-		// 	// Reward the validator
+		// count how many validators voted for MajorityVote
+		majorityCount = api.Add(majorityCount, isHonest)
+
+		//////////////////////////////////////////////////////
+		// Reward the validator
 		hFunc.Reset()
 		hFunc.Write(validator.Index)
 		hFunc.Write(validator.PublicKey.A.X)
 		hFunc.Write(validator.PublicKey.A.Y)
-		// hFunc.Write(api.Add(validator.Balance, RewardValidator))
 		hFunc.Write(newBalance)
-		// hFunc.Write(api.Add(validator.Reputation, ReputationIncrement))
-		// hFunc.Write(api.Add(validator.SeverityCount, Severity))
 		validator.MerkleProof.Path[0] = hFunc.Sum()
 
 		// 	//****sort and just need the last validator ComputeRootFromPath
@@ -261,28 +247,29 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 
 		bitMask := powbatching(api, 2, validator.Index)
 		validatorBits = api.Add(validatorBits, bitMask)
+
+		// set honest bit if isHonest==1
+		honestBits = api.Add(honestBits, api.Mul(isHonest, bitMask))
 	}
 
 	// Compute real majority: isOneMajority = 1 if count1 > count0, else 0
+	threshold := frontend.Variable(NumValidators / 2)
 
-	// cmp ∈ {-1,0,1}: 1 if count1>count0, 0 if equal, -1 if count1<count0
-	cmp := api.Cmp(count1, count0)
+	// cmp = 1 if majorityCount > threshold
+	cmp := api.Cmp(majorityCount, threshold)
 
-	// isOneMajority = 1  iff  cmp == 1
-	// So: cmp - 1 == 0  iff  cmp == 1
-	isOneMajority := api.IsZero(api.Sub(cmp, 1))
-	api.AssertIsBoolean(isOneMajority) // enforce it is 0 or 1
-
-	// Public input MajorityVote must match the circuit’s computed majority (0 or 1)
-	api.AssertIsBoolean(c.MajorityVote)
-	api.AssertIsEqual(isOneMajority, c.MajorityVote)
+	// MUST be strictly greater
+	api.AssertIsEqual(cmp, 1)
 
 	api.Println("[batching_out] ValidatorBits:", c.ValidatorBits)
 	api.Println(" [batching_circuit] ValidatorBits (bitmask):", validatorBits)
 
 	api.Println("[batching_out] ResultingStateRoot:", c.ResultingStateRoot)
 	api.Println(" [batching_circuit] ResultingStateRoot:", intermediateRoot)
+	api.Println("[batching_out] HonestBits:", c.HonestBits)
+	api.Println(" [batching_circuit] HonestBits (bitmask):", honestBits)
 	api.AssertIsEqual(c.ValidatorBits, validatorBits)
+	api.AssertIsEqual(c.HonestBits, honestBits)
 	api.AssertIsEqual(c.ResultingStateRoot, intermediateRoot)
 	api.Println("Successfully verified the batching circuit...")
 

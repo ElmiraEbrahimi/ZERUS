@@ -7,20 +7,32 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"runtime"
+	"sort"
+	"strconv"
 	"sync"
+	"time"
 
+	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
 	"l2alchemy/internal/oracle-repo/merkle"
+	"l2alchemy/internal/oracle-repo/util"
 
 	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bn254/fp"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	edwards "github.com/consensys/gnark-crypto/ecc/bn254/twistededwards"
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
+	tedwards "github.com/consensys/gnark-crypto/ecc/twistededwards"
 	"github.com/consensys/gnark-crypto/hash"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/backend/witness"
+	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/std/algebra/native/twistededwards"
+	eddsa2 "github.com/consensys/gnark/std/signature/eddsa"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -185,8 +197,7 @@ func (n *Node) listenToBlockchainEvents(quit chan struct{}) {
 				if accountRegEvent.ValidatorID.Uint64() == uint64(n.ID) {
 					n.Account.Index = accountRegEvent.Index
 					n.Account.Balance = accountRegEvent.Balance
-					n.Account.Reputation = accountRegEvent.Reputation
-					n.Account.SeverityCount = accountRegEvent.SeverityCount
+
 					fmt.Printf("node=%v registered: %v\n", n.ID, n.Account)
 				}
 
@@ -254,95 +265,120 @@ func (n *Node) Start() {
 			panic(fmt.Errorf("failed to sync state: %v", err))
 		}
 	}()
+	listnerQuit := make(chan struct{}, 1)
+	n.listenToBlockchainEvents(listnerQuit)
 
 	// register validator:
 	n.registerValidatorTx()
 
-	// n.wg.Add(1)
-	// go func() {
-	// 	for e := range n.OracleMessages {
+	n.wg.Add(1)
+	go func() {
+		for e := range n.OracleMessages {
+			// ignore messages from self:
+			// if e.From == n.ID {
+			// 	continue
+			// }
 
-	// 		// message from oracle:
-	// 		if e.From == OracleID {
-	// 			if e.Title == MessageTitleTerminate {
-	// 				fmt.Printf("node %d terminating...\n", n.ID)
-	// 				/////////////////////////////////////////////////////
-	// 				// if n.ID == 0 { // or if n.IsAggregator() or totalValidators-1
-	// 				// //  or with setting in config n.ShouldWithdrawOnExit
+			// message from oracle:
+			if e.From == OracleID {
+				if e.Title == MessageTitleTerminate {
+					fmt.Printf("node %d terminating...\n", n.ID)
+					/////////////////////////////////////////////////////
+					// if n.ID == 0 { // or if n.IsAggregator() or totalValidators-1
+					// //  or with setting in config n.ShouldWithdrawOnExit
 
-	// 				// 	err := n.WithDrawAccounts([]*gnark.Account{n.Account}, n.state)
-	// 				// 	if err != nil {
-	// 				// 		fmt.Printf("node %d failed to withdraw: %v\n", n.ID, err)
-	// 				// 	} else {
-	// 				// 		fmt.Printf("node %d successfully withdrew before termination.\n", n.ID)
-	// 				// 	}
-	// 				// }
-	// 				// /////////////////////////////////////////////////////
-	// 				n.wg.Done()
-	// 				return
-	// 			}
-	// 			if e.Title == MessageTittleSelectWiVote && n.IsAggregator() {
-	// 				fmt.Printf("aggregator (node=%d) is performing wiVote selection...\n", n.ID)
-	// 				fmt.Printf("wivotes: %v\n", n.WiVotes)
-	// 				if len(n.WiVotes) != 0 {
-	// 					for uniqueReqID := range n.WiVotes {
-	// 						// aggregator wiVote process:
-	// 						err := n.AggregatorProcessWiVote(uniqueReqID)
-	// 						if err != nil {
-	// 							panic(fmt.Errorf("failed to process wiVote: %v", err))
-	// 						}
+					// 	err := n.WithDrawAccounts([]*gnark.Account{n.Account}, n.state)
+					// 	if err != nil {
+					// 		fmt.Printf("node %d failed to withdraw: %v\n", n.ID, err)
+					// 	} else {
+					// 		fmt.Printf("node %d successfully withdrew before termination.\n", n.ID)
+					// 	}
+					// }
+					// /////////////////////////////////////////////////////
+					listnerQuit <- struct{}{}
+					n.wg.Done()
+					return
+				}
+				if e.Title == MessageTittleSelectWiVote && n.IsAggregator() {
+					fmt.Printf("aggregator (node=%d) is performing wiVote selection...\n", n.ID)
+					fmt.Printf("wivotes: %v\n", n.WiVotes)
+					if len(n.WiVotes) != 0 {
+						for uniqueReqID := range n.WiVotes {
+							// aggregator wiVote process:
+							err := n.AggregatorProcessWiVote(uniqueReqID)
+							if err != nil {
+								panic(fmt.Errorf("failed to process wiVote: %v", err))
+							}
 
-	// 					}
-	// 				}
+						}
+					}
 
-	// 				// reset wivotes:
-	// 				n.aggregatorResetWiVotes()
-	// 			}
+					// reset wivotes:
+					n.aggregatorResetWiVotes()
+				}
+				//$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+				if e.Title == MessageTittleBatchedWiVote && n.IsAggregator() {
+					fmt.Printf("aggregator (node=%d) is performing batch wiVote... (len of batched votes=%d)\n", n.ID, len(n.BatchedWiVote.WithdrawalReqIDs))
 
-	// 			if e.Title == MessageTittleSelectIncVote && n.IsAggregator() {
-	// 				fmt.Printf("aggregator (node %d) is performing incVote selection...\n", n.ID)
-	// 				fmt.Printf("incvotes: %v\n", n.IncVotes)
-	// 				selected := make([]*IncVote, 0)
-	// 				for commitmentHashStr := range n.IncVotes {
-	// 					selectedIncVote, err := n.AggregatorSelectVote(commitmentHashStr)
-	// 					if err != nil {
-	// 						fmt.Printf("failed to select incVote: %v\n", err)
-	// 						continue
-	// 					}
-	// 					fmt.Printf("selected tree index is: %v\n", selectedIncVote.IncTreeIndex)
-	// 					selected = append(selected, selectedIncVote)
-	// 				}
-	// 				if len(selected) != 0 {
-	// 					// fetch and update ipfs:
-	// 					if n.IPFSClient.LatestHash != "" {
-	// 						fmt.Printf("fetching ipfs content... (node_id=%v)\n", n.ID)
-	// 						n.IPFSContent = n.FetchIPFS()
-	// 					}
-	// 					for _, incVote := range selected {
-	// 						n.IPFSContent.CommitmentHashIncVote[string(incVote.CommitmentHash)] = *incVote
-	// 					}
-	// 					n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
-	// 					fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
-	// 					latestIPFSHash, _ := n.UpdateIPFS()
-	// 					n.updateLatestIPFSHashTx(latestIPFSHash)
-	// 				}
-	// 				n.aggregatorResetIncVotes()
-	// 			}
-	// 		}
+					majorityVote, err := n.processBatchedWiVotes()
+					if err != nil {
+						panic(fmt.Errorf("failed to process batched wiVotes: %v", err))
+					}
+					fmt.Printf("majority vote result ", majorityVote.String())
 
-	// 		// message from other nodes:
-	// 		if e.Title == MessageTittleWiVote && n.IsAggregator() {
-	// 			fmt.Printf("aggregator (node %d) is collecting wiVote...\n", n.ID)
-	// 			wiVote := e.Message.(*WiVote)
-	// 			n.aggregatorCollectWiVote(wiVote)
-	// 		}
-	// 		if e.Title == MessageTittleIncVote && n.IsAggregator() {
-	// 			fmt.Printf("aggregator (node %d) is collecting incVote...\n", n.ID)
-	// 			incVote := e.Message.(*IncVote)
-	// 			n.aggregatorCollectIncVote(incVote)
-	// 		}
-	// 	}
-	// }()
+					// fmt.Printf("aggregator (node=%d) is performing batch slashing...\n", n.ID)
+					// err = n.processBatchedSlashing(majorityVote)
+					// if err != nil {
+					// 	panic(fmt.Errorf("failed to slash: %v", err))
+					// }
+
+					n.resetBatchedWiVotes()
+				}
+				//$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+				if e.Title == MessageTittleSelectIncVote && n.IsAggregator() {
+					fmt.Printf("aggregator (node %d) is performing incVote selection...\n", n.ID)
+					fmt.Printf("incvotes: %v\n", n.IncVotes)
+					selected := make([]*IncVote, 0)
+					for commitmentHashStr := range n.IncVotes {
+						selectedIncVote, err := n.AggregatorSelectVote(commitmentHashStr)
+						if err != nil {
+							fmt.Printf("failed to select incVote: %v\n", err)
+							continue
+						}
+						fmt.Printf("selected tree index is: %v\n", selectedIncVote.IncTreeIndex)
+						selected = append(selected, selectedIncVote)
+					}
+					if len(selected) != 0 {
+						// fetch and update ipfs:
+						if n.IPFSClient.LatestHash != "" {
+							fmt.Printf("fetching ipfs content... (node_id=%v)\n", n.ID)
+							n.IPFSContent = n.FetchIPFS()
+						}
+						for _, incVote := range selected {
+							n.IPFSContent.CommitmentHashIncVote[string(incVote.CommitmentHash)] = *incVote
+						}
+						n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
+						fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
+						latestIPFSHash, _ := n.UpdateIPFS()
+						n.updateLatestIPFSHashTx(latestIPFSHash)
+					}
+					n.aggregatorResetIncVotes()
+				}
+			}
+
+			// message from other nodes:
+			if e.Title == MessageTittleWiVote && n.IsAggregator() {
+				fmt.Printf("aggregator (node %d) is collecting wiVote...\n", n.ID)
+				wiVote := e.Message.(*WiVote)
+				n.aggregatorCollectWiVote(wiVote)
+			}
+			if e.Title == MessageTittleIncVote && n.IsAggregator() {
+				fmt.Printf("aggregator (node %d) is collecting incVote...\n", n.ID)
+				incVote := e.Message.(*IncVote)
+				n.aggregatorCollectIncVote(incVote)
+			}
+		}
+	}()
 }
 
 func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error) {
@@ -507,6 +543,397 @@ func (n *Node) AggregatorProcessWiVote(uniqueReqID string) error {
 	return nil
 }
 
+func (n *Node) processBatchedWiVotes() (*big.Int, error) {
+
+	voteSlice := make([]*BatchedWiVote, 0)
+	for i, node := range n.Oracle.Nodes {
+		voteSlice = append(voteSlice, node.BatchedWiVote)
+		fmt.Printf("Before sort - voteSlice[%d]: Index = %v\n", i, node.BatchedWiVote.Index)
+	}
+
+	// FIXED: Sort by Index
+	sort.Slice(voteSlice, func(i, j int) bool {
+		return voteSlice[i].Index.Uint64() < voteSlice[j].Index.Uint64()
+	})
+
+	// ✅ Print after sorting
+	for i, vote := range voteSlice {
+		fmt.Printf("After sort - voteSlice[%d]: Index = %v\n", i, vote.Index)
+	}
+
+	majorityVote := big.NewInt(31) // TODO: fixme take majority vote from the batch wivotes
+
+	fmt.Printf("selected wivotes bathced: %v\n", voteSlice)
+
+	preStateData := make([]byte, len(n.state.Data))
+	copy(preStateData, n.state.Data)
+
+	preStateHData := make([]byte, len(n.state.HData))
+	copy(preStateHData, n.state.HData)
+
+	hfunc := hash.MIMC_BN254.New()
+
+	sort.Slice(n.BatchedWiVote.WithdrawalReqIDs, func(i, j int) bool {
+		return n.BatchedWiVote.WithdrawalReqIDs[i].Cmp(n.BatchedWiVote.WithdrawalReqIDs[j]) < 0
+	})
+
+	hfunc.Reset()
+	for i := 0; i < len(n.BatchedWiVote.WithdrawalReqIDs); i++ {
+		hfunc.Write(n.BatchedWiVote.WithdrawalReqIDs[i].Bytes())
+	}
+	batchCommitment := hfunc.Sum(nil)
+	batchCommitment = util.ModToBn254Bytes(batchCommitment)[:32]
+
+	hfunc.Reset()
+	fmt.Printf("Length of WithdrawalReqIDs: %d\n", len(n.BatchedWiVote.WithdrawalReqIDs))
+	if len(n.BatchedWiVote.WithdrawalReqIDs) != votingbatch.BatchSize {
+		fmt.Println("Batch size is not equal to the number of votes")
+	}
+
+	fmt.Println("Sorted WithdrawalReqIDs:")
+	for _, id := range n.BatchedWiVote.WithdrawalReqIDs {
+		fmt.Println(id)
+	}
+
+	fmt.Println("Sorted validator indexes in voteSlice:")
+	for _, v := range voteSlice {
+		fmt.Println(v.Index.Uint64())
+	}
+
+	aggregatorRootBytes, aggregatorProofBytes, err := n.state.MerkleProof(n.Account.Index.Uint64())
+	if err != nil {
+		return nil, fmt.Errorf("aggregator merkle proof: %w", err)
+	}
+
+	fmt.Printf("aggregatorRootBytes Aggregator state.MerleProof--------- %x\n", aggregatorRootBytes)
+	aggregatorProof := make([]frontend.Variable, len(aggregatorProofBytes))
+	for j := range aggregatorProofBytes {
+		aggregatorProof[j] = frontend.Variable(new(big.Int).SetBytes(aggregatorProofBytes[j]))
+	}
+
+	preSeedX, preSeedY, err := n.getSeed()
+	if err != nil {
+		return nil, fmt.Errorf("get seed: %w", err)
+	}
+
+	preSeed := edwards.NewPointAffine(*new(fr.Element).SetBigInt(preSeedX), *new(fr.Element).SetBigInt(preSeedY))
+	modulus := edwards.GetEdwardsCurve().Order
+	sk := big.NewInt(0).SetBytes(n.privateKey.Bytes()[fp.Bytes : 2*fp.Bytes])
+	sk.Mod(sk, &modulus)
+
+	var postSeed edwards.PointAffine
+	postSeed.ScalarMultiplication(&preSeed, sk)
+
+	postSeedX := new(big.Int)
+	postSeedY := new(big.Int)
+
+	postSeed.X.BigInt(postSeedX)
+	postSeed.Y.BigInt(postSeedY)
+	aggregatorAccount, err := n.state.ReadAccount(n.Account.Index.Uint64())
+	if err != nil {
+		return nil, fmt.Errorf("read aggregator account: %w", err)
+	}
+
+	aggregatorConstraints := votingbatch.BatchingAggregatorConstraints{
+		Index:     new(big.Int).Set(n.Account.Index),
+		PreSeed:   twistededwards.Point{X: new(big.Int).Set(preSeedX), Y: new(big.Int).Set(preSeedY)},
+		PostSeed:  twistededwards.Point{X: new(big.Int).Set(postSeedX), Y: new(big.Int).Set(postSeedY)},
+		SecretKey: new(big.Int).Set(sk),
+		Balance:   new(big.Int).Set(aggregatorAccount.Balance),
+		MerkleProof: votingbatch.MerkleProofW{
+			RootHash: aggregatorRootBytes,
+			Path:     aggregatorProof,
+		},
+	}
+
+	aggregatorAccount.Balance.Add(new(big.Int).Set(aggregatorAccount.Balance), big.NewInt(votingbatch.RewardAggregator))
+
+	err = n.state.WriteAccount(aggregatorAccount)
+	if err != nil {
+		return nil, fmt.Errorf("write account: %w", err)
+	}
+
+	var validatorConstraints [votingbatch.NumValidators]votingbatch.BatchingValidatorConstraints
+
+	validatorBits := new(big.Int)
+	honestBits := new(big.Int) //tracks validators matching majority
+
+	fmt.Printf("Votes length--------- %x\n", len(voteSlice))
+
+	// var tempPostState []byte
+	for i, vote := range voteSlice {
+
+		// 1. Find the node who signed this vote
+		node := n.Oracle.Nodes[uint(vote.Index.Uint64())]
+
+		// 2. Rebuild the original message that was signed
+		// hfunc.Reset()
+		// hfunc.Write(vote.Index.Bytes())
+		// hfunc.Write(batchCommitment)
+		// hfunc.Write(big.NewInt(31).Bytes()) // TODO: fixme
+		// hfunc.Write(new(big.Int).SetInt64(int64(n.Oracle.RoundID)).Bytes())
+		// msg := hfunc.Sum(nil)
+
+		msg := hashBatchVoteFieldwise(
+			new(big.Int).Set(vote.Index),
+			new(big.Int).SetBytes(batchCommitment[:32]),
+			big.NewInt(31), // or majorityVote //TODO: fixme
+			big.NewInt(int64(n.Oracle.RoundID)),
+		)
+
+		// 3. Re-sign the vote (this can be for validation or to force resync)
+		vote.Signature, err = node.privateKey.Sign(msg, hfunc)
+		if err != nil {
+			return nil, fmt.Errorf("sign the vote: %w", err)
+		}
+
+		// 4. Read validator account from state
+		validatorAccount, err := n.state.ReadAccount(vote.Index.Uint64())
+		if err != nil {
+			return nil, fmt.Errorf("read validator account: %w", err)
+		}
+
+		// 5. Use the correct public key & assign the signature
+		var publicKey eddsa2.PublicKey
+		var signature eddsa2.Signature
+
+		// make sure use the node public key
+		publicKey.Assign(tedwards.BN254, node.privateKey.PublicKey.Bytes())
+		signature.Assign(tedwards.BN254, vote.Signature)
+
+		fmt.Printf("**************Validator [%d] index: %d **********\n", i, validatorAccount.Index.Uint64())
+		rootBytes, proofBytes, err := n.state.MerkleProofBytes(validatorAccount.Index.Uint64())
+		if err != nil {
+			return nil, fmt.Errorf("validator merkle proof: %w", err)
+		}
+		fmt.Printf("rootBytes Validator state.MerleProof--------- %x\n", rootBytes)
+		validatorProof := make([]frontend.Variable, len(proofBytes))
+		for j := range proofBytes {
+			validatorProof[j] = frontend.Variable(proofBytes[j])
+		}
+
+		validatorConstraints[i] = votingbatch.BatchingValidatorConstraints{
+			//Index:     new(big.Int).Set(validatorAccount.Index),
+			Index:     new(big.Int).Set(validatorAccount.Index),
+			PublicKey: publicKey,
+			Balance:   new(big.Int).Set(validatorAccount.Balance), //passed by reference
+			MerkleProof: votingbatch.MerkleProofW{
+				RootHash: rootBytes,
+				Path:     validatorProof,
+			},
+			Signature: signature,
+			//Vote:      big.NewInt(31), // TODO: fixme
+			Vote: big.NewInt(31), // TODO: fixme based on the majority vote it should be 1
+
+		}
+
+		fmt.Printf("Validator[%d] LeafHash Inputs:\n", i)
+		fmt.Printf("  Index     =  %x\n", validatorAccount.Index.String())
+		fmt.Printf("  PubKey.X  =  %x\n", publicKey.A.X)
+		fmt.Printf("  PubKey.Y  =  %x\n", publicKey.A.Y)
+		fmt.Printf("  Balance   =  %x\n", validatorAccount.Balance.String())
+		fmt.Printf("  Merkle Root = %x\n", rootBytes)
+
+		validatorBit := new(big.Int)
+		validatorBit.Exp(big.NewInt(2), new(big.Int).Set(vote.Index), nil)
+
+		validatorBits = validatorBits.Add(new(big.Int).Set(validatorBits), new(big.Int).Set(validatorBit))
+		// *****************************************************************************
+		// //mark validator as honest if vote matches majority
+		// if vote.IsApproved.Cmp(majorityWiVote) == 0 {
+		// 	honestBits = honestBits.Add(
+		// 		new(big.Int).Set(honestBits),
+		// 		new(big.Int).Set(validatorBit),
+		// 	)
+		// }
+		// // slash
+		// if vote.IsApproved.Cmp(majorityWiVote) == 0 {
+		// 	// honest validator → fixed reward
+		// 	validatorAccount.Balance.Add(
+		// 		new(big.Int).Set(validatorAccount.Balance),
+		// 		big.NewInt(gnark.RewardValidator),
+		// 	)
+		// } else {
+		// 	// dishonest validator → FULL SLASH
+		// 	validatorAccount.Balance.SetInt64(0)
+		// }
+
+		// ------------------------------------------------------------------
+		// TEMP FIX (batch voting):
+		//   - BatchSize = 5
+		//   - Correct vote  = 31 (0b11111)
+		//   - Bad vote      = 30 (0b11110)
+		//   - MajorityVote  = 31
+		// TODO: Replace with real per-validator bitmask comparison later
+		// ------------------------------------------------------------------
+
+		// validatorVote := validatorConstraints[i].Vote // this is the value the circuit uses (31)
+		validatorVote := big.NewInt(31) // TEMP: validator vote (31 = honest, 30 = bad)
+		majorityVote := big.NewInt(31)  // TEMP: majority vote (31 = honest, 30 = bad)
+
+		fmt.Printf("DEBUG honest calc: idx=%d validatorVote=%s majorityVote=%s\n",
+			vote.Index.Uint64(), validatorVote.String(), majorityVote.String(),
+		)
+
+		// mark validator as honest if vote matches majority
+		if validatorVote.Cmp(majorityVote) == 0 {
+			honestBits = honestBits.Add(
+				new(big.Int).Set(honestBits),
+				new(big.Int).Set(validatorBit),
+			)
+
+			// honest validator → fixed reward
+			validatorAccount.Balance.Add(
+				new(big.Int).Set(validatorAccount.Balance),
+				big.NewInt(votingbatch.RewardValidator),
+			)
+		} else {
+			// dishonest validator → FULL SLASH
+			validatorAccount.Balance.SetInt64(0)
+		}
+
+		err = n.state.WriteAccount(validatorAccount)
+		if err != nil {
+			return nil, fmt.Errorf("write account: %w", err)
+		}
+
+		// *****************************************************************************
+		err = n.state.WriteAccount(validatorAccount)
+		if err != nil {
+			return nil, fmt.Errorf("write account: %w", err)
+		}
+	}
+
+	postStateRoot, err := n.state.Root()
+	if err != nil {
+		return nil, fmt.Errorf("state root: %w", err)
+	}
+
+	// uniqueReqIdInt, ok := new(big.Int).SetString(uniqueReqID, 10)
+	// if !ok {
+	// 	panic("failed to convert uniqueReqID to big.Int")
+	// }
+
+	// fmt.Printf("POST STATE POST: %x  --- TEMP POST STATE: %x ", postStateRoot, tempPostState)
+
+	withdrawalReqIDs := make([]frontend.Variable, len(n.BatchedWiVote.WithdrawalReqIDs))
+	for i := range n.BatchedWiVote.WithdrawalReqIDs {
+		withdrawalReqIDs[i] = frontend.Variable(n.BatchedWiVote.WithdrawalReqIDs[i])
+	}
+
+	assignment := votingbatch.BatchingVotingCircuit{
+		ResultingStateRoot: postStateRoot,
+		//RoundID:            n.Oracle.RoundID,
+		RoundID:          new(big.Int).SetInt64(int64(n.Oracle.RoundID)),
+		BatchCommitment:  batchCommitment[:32],
+		MajorityVote:     new(big.Int).Set(majorityVote),
+		ValidatorBits:    new(big.Int).Set(validatorBits),
+		HonestBits:       new(big.Int).Set(honestBits), // NEW
+		WithdrawalReqIDs: withdrawalReqIDs,
+		Aggregator:       aggregatorConstraints,
+		Validators:       validatorConstraints,
+	}
+
+	// Print all variables used in the assignment
+	fmt.Printf("ResultingStateRoot: %v\n", postStateRoot)
+	fmt.Printf("RoundID: %v\n", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
+	fmt.Printf("BatchCommitment: %v\n", batchCommitment[:32])
+	fmt.Printf("MajorityVote: %v\n", new(big.Int).Set(majorityVote))
+	fmt.Printf("ValidatorBits: %v\n", new(big.Int).Set(validatorBits))
+	fmt.Printf("WithdrawalReqIDs: %v\n", withdrawalReqIDs)
+	fmt.Printf("Aggregator: %+v\n", aggregatorConstraints)
+	fmt.Printf("Validators: %+v\n", validatorConstraints)
+
+	witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	if err != nil {
+		return nil, fmt.Errorf("create witness: %w", err)
+	}
+
+	var m1, m2 runtime.MemStats
+
+	runtime.GC()
+	runtime.ReadMemStats(&m1)
+	start := time.Now()
+	p, err := groth16.Prove(n.Oracle.SparseR1CS, n.Oracle.SparsePK, witness)
+	if err != nil {
+		return nil, fmt.Errorf("prove: %v", err)
+	}
+	runtime.ReadMemStats(&m2)
+	provingTime := time.Since(start)
+
+	// flush to csv:
+
+	data := [][]string{{
+		strconv.Itoa(int(n.cfg.NodeCount)),
+		strconv.Itoa(int(provingTime.Milliseconds())),
+		//strconv.Itoa(int(util.BToMb(m2.TotalAlloc - m1.TotalAlloc))),
+
+		strconv.Itoa(
+			int(util.BToMb(m2.TotalAlloc-m1.TotalAlloc)) + n.Oracle.CircuitMemTime.SparseCompileMemory,
+		),
+
+		strconv.Itoa(n.Oracle.CircuitMemTime.SparseCompileMemory),
+		strconv.Itoa(n.Oracle.CircuitMemTime.SparseCompileTime),
+		time.Now().Format("2006-01-02 15:04:05"),
+	}}
+
+	for _, row := range data {
+		err = n.Oracle.SparseMemTimeCSVWriter.Write(row)
+		if err != nil {
+			return nil, fmt.Errorf("failed writing gas data: %v", err)
+		}
+	}
+	// n.Oracle.SparseMemTimeCSVWriter.Flush()
+
+	pw, err := witness.Public()
+	if err != nil {
+		return nil, fmt.Errorf("public witness: %w", err)
+	}
+
+	err = groth16.Verify(p, n.Oracle.SparseVK, pw) // TODO: delete maybe later
+	if err != nil {
+		return nil, fmt.Errorf("verify proof: %w", err)
+	}
+
+	proof, err := util.ProofToEthereumProof(p)
+	if err != nil {
+		return nil, fmt.Errorf("proof to ethereum proof: %w", err)
+	}
+
+	//Reset state
+	n.state.SetData(preStateData)
+	n.state.SetHData(preStateHData)
+
+	fmt.Println(" --- Scalar Field Check Complete --- ")
+
+	check("aggregator account index", n.Account.Index)
+	check("slashedValIndex", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
+	check("uniqueReqID", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
+	check("postStateRoot", new(big.Int).SetBytes(postStateRoot))
+	check("postSeedX", postSeedX)
+	check("postSeedY", postSeedY)
+	check("batchCommitment", new(big.Int).SetBytes(batchCommitment))
+	check("majorityVote", majorityVote)
+	check("validatorBits", validatorBits)
+
+	n.aggregatorSubmitWiVoteTx(
+		n.Account.Index,
+		new(big.Int).SetInt64(int64(n.Oracle.RoundID)), // Pass the first element of the slice as an example
+		new(big.Int).SetBytes(batchCommitment[:32]),
+		validatorBits,
+		honestBits, // NEW
+		new(big.Int).Set(majorityVote),
+		new(big.Int).SetBytes(postStateRoot),
+		postSeedX,
+		postSeedY,
+		proof.Proof,
+	)
+
+	fmt.Println("aggregatorSubmitWiVoteTx submitted successfully")
+
+	return majorityVote, nil
+}
+
 func hashWiVoteFieldwise(wivote *WiVote) []byte {
 	hfunc := hash.MIMC_BN254.New()
 	hfunc.Reset()
@@ -524,6 +951,45 @@ func hashWiVoteFieldwise(wivote *WiVote) []byte {
 
 	return hfunc.Sum(nil)
 }
+
+func hashBatchVoteFieldwise(index, batchCommitment, vote, roundID *big.Int) []byte {
+	hFunc := hash.MIMC_BN254.New()
+	hFunc.Reset()
+
+	var fe fr.Element
+
+	fe.SetBigInt(index)
+	hFunc.Write(fe.Marshal()[:])
+
+	fe.SetBigInt(batchCommitment)
+	hFunc.Write(fe.Marshal()[:])
+
+	fe.SetBigInt(vote)
+	hFunc.Write(fe.Marshal()[:])
+
+	fe.SetBigInt(roundID)
+	hFunc.Write(fe.Marshal()[:])
+
+	return hFunc.Sum(nil)
+}
+
+// func marshalHash(Index *big.Int, RequestID *big.Int, IsApproved *big.Int) []byte {
+// 	hfunc := hash.MIMC_BN254.New()
+// 	hfunc.Reset()
+
+// 	var fe fr.Element
+
+// 	fe.SetBigInt(Index)
+// 	hfunc.Write(fe.Marshal()[:]) // feeds the field element in canonical form
+
+// 	fe.SetBigInt(RequestID)
+// 	hfunc.Write(fe.Marshal()[:])
+
+// 	fe.SetBigInt(IsApproved)
+// 	hfunc.Write(fe.Marshal()[:])
+
+// 	return hfunc.Sum(nil)
+// }
 
 // endregion
 
@@ -547,11 +1013,6 @@ func (n *Node) selectNewAggregatorTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.ChooseNewAggregator(trxOpts)
 	if err != nil {
@@ -589,11 +1050,6 @@ func (n *Node) registerValidatorTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	pk := gnark.PublicKeyToOraclePublicKey(n.Account.PublicKey)
 	tx, err := bcClient.RegisterValidator(trxOpts, big.NewInt(int64(n.ID)), *pk)
@@ -610,6 +1066,8 @@ func (n *Node) registerValidatorTx() error {
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
+
+	n.Oracle.GasCosts.RegisterValidatorCost = receipt.GasUsed
 
 	return nil
 }
@@ -631,11 +1089,6 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.UpdateLatestIPFSHash(trxOpts, latestIPFSHash)
 	if err != nil {
@@ -652,10 +1105,12 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
 
+	n.Oracle.GasCosts.UpdateLatestIPFSHash = receipt.GasUsed
+
 	return nil
 }
 
-func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) error {
+func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, batchCommitment *big.Int, validatorBits *big.Int, honestBits *big.Int, vote *big.Int, postStateRoot *big.Int, postSeedX *big.Int, postSeedY *big.Int, proof [8]*big.Int) error {
 	fmt.Printf("submitting wivote (node=%v) ...\n", n.ID)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
@@ -672,18 +1127,14 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	tx, err := bcClient.SubmitWiVote(
 		trxOpts,
 		index,
 		uniqueReqID,
 		batchCommitment,
-		validatorBits,
+		toScalarField(validatorBits),
+		toScalarField(honestBits),
 		vote,
 		postStateRoot,
 		postSeedX,
@@ -704,6 +1155,8 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}
+
+	n.Oracle.GasCosts.SubmitWiVoteCost += receipt.GasUsed
 
 	return nil
 }
@@ -742,11 +1195,6 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -757,8 +1205,6 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	fmt.Printf("  PublicKey.X   : %x\n", replaceAccount.PublicKey.A.X.String())
 	fmt.Printf("  PublicKey.Y   : %x\n", replaceAccount.PublicKey.A.Y.String())
 	fmt.Printf("  Balance       : %x\n", replaceAccount.Balance.String())
-	fmt.Printf("  Reputation    : %x\n", replaceAccount.Reputation.String())
-	fmt.Printf("  SeverityCount : %x\n", replaceAccount.SeverityCount.String())
 
 	tx, err := bcClient.Replace(
 		trxOpts,
@@ -780,6 +1226,7 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 
 	if receipt.Status == 1 {
 		log.Printf("replace: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		n.Oracle.GasCosts.ReplaceCost += receipt.GasUsed
 	} else {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -819,11 +1266,6 @@ func (n *Node) ExitTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -850,6 +1292,7 @@ func (n *Node) ExitTx() error {
 
 	if receipt.Status == 1 {
 		log.Printf("exit: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		n.Oracle.GasCosts.ExitCost += receipt.GasUsed
 	} else {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -889,11 +1332,6 @@ func (n *Node) WithdrawAccountTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := n.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
 	if err != nil {
@@ -923,6 +1361,7 @@ func (n *Node) WithdrawAccountTx() error {
 
 	if receipt.Status == 1 {
 		log.Printf("Withdrawn: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		n.Oracle.GasCosts.WithdrawCost += receipt.GasUsed
 	} else {
 		log.Fatalf("withdraw tx reverted (index=%d)\n", account.Index.Uint64())
 	}

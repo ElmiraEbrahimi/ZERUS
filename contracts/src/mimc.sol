@@ -18,7 +18,7 @@ library MiMC {
     function encipher(
         uint256 in_x,
         uint256 in_k
-    ) internal pure returns (uint256 out_x) {
+    ) public pure returns (uint256 out_x) {
         return MiMCpe5(in_x, in_k, uint256(keccak256("seed")), 91);
     }
 
@@ -90,11 +90,11 @@ library MiMC {
     function hash(
         uint256[] memory in_msgs,
         uint256 in_key
-    ) internal pure returns (uint256) {
+    ) public pure returns (uint256) {
         return MiMCpe5_mp(in_msgs, in_key, uint256(keccak256("seed")), 91);
     }
 
-    function hash(uint256[] memory in_msgs) internal pure returns (uint256) {
+    function hash(uint256[] memory in_msgs) public pure returns (uint256) {
         return hash(in_msgs, 0);
     }
 }

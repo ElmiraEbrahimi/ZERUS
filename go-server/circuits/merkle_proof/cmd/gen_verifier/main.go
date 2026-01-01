@@ -3,17 +3,35 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
+	"github.com/joho/godotenv"
 
 	merkleproof "l2alchemy/circuits/merkle_proof"
 )
 
 func main() {
-	var circuit merkleproof.MerkleProofCircuit
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load("../.env")
+
+	depthStr := os.Getenv("INC_TREE_DEPTH")
+	if depthStr == "" {
+		log.Fatal("INC_TREE_DEPTH is required to size the Merkle proof path")
+	}
+	depth, err := strconv.Atoi(depthStr)
+	if err != nil || depth < 1 {
+		log.Fatalf("invalid INC_TREE_DEPTH %q", depthStr)
+	}
+
+	circuit := merkleproof.MerkleProofCircuit{
+		M: merkleproof.MerkleProof{
+			Path: make([]frontend.Variable, depth+1),
+		},
+	}
 
 	cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &circuit)
 	if err != nil {

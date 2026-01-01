@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
 	"math/big"
@@ -118,11 +119,9 @@ func (s *StateSync) HandleRegisteredEvent(ctx context.Context, event *bc.OracleR
 	publicKey := eddsa.PublicKey{A: twistededwards.NewPointAffine(x, y)}
 
 	account := Account{
-		Index:         event.Index,
-		PublicKey:     &publicKey,
-		Balance:       event.Value,
-		Reputation:    event.Reputation,
-		SeverityCount: event.SeverityCount,
+		Index:     event.Index,
+		PublicKey: &publicKey,
+		Balance:   event.Value,
 	}
 
 	err := s.state.WriteAccount(account)
@@ -134,37 +133,68 @@ func (s *StateSync) HandleRegisteredEvent(ctx context.Context, event *bc.OracleR
 }
 
 func (s *StateSync) HandleWatchWiVoteSubmittedEvent(ctx context.Context, event *bc.OracleWiVoteSubmitted) error {
-	fmt.Println("handle wivote submitted event: request:%w, submitter%w", event.Request.Uint64(), "submitter", event.Submitter.Uint64())
+	// fmt.Println("handle wivote submitted event: request:%w, submitter%w", event.Request.Uint64(), "submitter", event.Submitter.Uint64())
+	fmt.Printf(
+		"handle wivote submitted event: request=%d submitter=%d validatorsBits=%s honestBits=%s majority=%s\n",
+		event.Request.Uint64(),
+		event.Submitter.Uint64(),
+		event.Validators.String(),
+		event.HonestBits.String(),
+		event.MajorityVote.String(),
+	)
 
 	aggregatorAccount, err := s.state.ReadAccount(event.Submitter.Uint64())
 	if err != nil {
 		return fmt.Errorf("read aggregator account: %w", err)
 	}
-	aggregatorAccount.Reputation.Add(aggregatorAccount.Reputation, big.NewInt(2))
-	aggregatorAccount.SeverityCount.Add(aggregatorAccount.SeverityCount, big.NewInt(1))
-	aggregatorAccount.Balance.Add(aggregatorAccount.Balance, big.NewInt(RewardAggregator))
+	aggregatorAccount.Balance.Add(aggregatorAccount.Balance, big.NewInt(votingbatch.RewardAggregator))
 	err = s.state.WriteAccount(aggregatorAccount)
 	if err != nil {
 		return fmt.Errorf("write account: %w", err)
 	}
 
+	// for i := 0; i < s.cfg.NodeCount; i++ {
+	// 	if event.Validators.Bit(i) == 0 {
+	// 		continue
+	// 	}
+
+	// 	account, err := s.state.ReadAccount(uint64(i))
+	// 	if err != nil {
+	// 		return fmt.Errorf("read aggregator account: %w", err)
+	// 	}
+	// 	//slash here
+	// 	account.Balance.Add(account.Balance, big.NewInt(RewardValidator))
+	// 	err = s.state.WriteAccount(account)
+	// 	if err != nil {
+	// 		return fmt.Errorf("write account: %w", err)
+	// 	}
+	// }
+
 	for i := 0; i < s.cfg.NodeCount; i++ {
+		// only validators who participated in this round
 		if event.Validators.Bit(i) == 0 {
 			continue
 		}
 
 		account, err := s.state.ReadAccount(uint64(i))
 		if err != nil {
-			return fmt.Errorf("read aggregator account: %w", err)
+			return fmt.Errorf("read validator account (i=%d): %w", i, err)
 		}
-		account.Reputation.Add(account.Reputation, big.NewInt(2))
-		account.SeverityCount.Add(account.SeverityCount, big.NewInt(1))
-		account.Balance.Add(account.Balance, big.NewInt(RewardValidator))
-		err = s.state.WriteAccount(account)
-		if err != nil {
-			return fmt.Errorf("write account: %w", err)
+
+		// honest if honestBits has bit i = 1
+		if event.HonestBits.Bit(i) == 1 {
+			// honest → reward
+			account.Balance.Add(account.Balance, big.NewInt(votingbatch.RewardValidator))
+		} else {
+			// dishonest → slash
+			account.Balance.SetInt64(0)
+		}
+
+		if err := s.state.WriteAccount(account); err != nil {
+			return fmt.Errorf("write validator account (i=%d): %w", i, err)
 		}
 	}
+
 	root, _ := s.state.Root()
 	fmt.Println("root after update:", hex.EncodeToString(root))
 	return nil

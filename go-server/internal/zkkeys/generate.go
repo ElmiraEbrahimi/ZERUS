@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"l2alchemy/circuits/merkle_proof"
@@ -35,9 +36,17 @@ func GenerateKeysToFiles(c CircuitName, pkPath, vkPath string, force bool) (cons
 	var circuit frontend.Circuit
 	switch c {
 	case CircuitMerkleProof:
-		circuit = &merkleproof.MerkleProofCircuit{}
+		merkleCircuit, err := merkleCircuitFromEnv()
+		if err != nil {
+			return nil, nil, nil, 0, 0, err
+		}
+		circuit = merkleCircuit
 	case CircuitVotingBatch:
-		circuit = &votingbatch.BatchingVotingCircuit{}
+		votingCircuit, err := votingBatchCircuitFromEnv()
+		if err != nil {
+			return nil, nil, nil, 0, 0, err
+		}
+		circuit = votingCircuit
 	default:
 		return nil, nil, nil, 0, 0, fmt.Errorf("unknown circuit: %s", c)
 	}
@@ -166,10 +175,61 @@ func writeKeyAtomic(path string, writeFn func(*os.File) error) error {
 func CompileOnly(c CircuitName) (constraint.ConstraintSystem, error) {
 	switch c {
 	case CircuitMerkleProof:
-		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &merkleproof.MerkleProofCircuit{})
+		merkleCircuit, err := merkleCircuitFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, merkleCircuit)
 	case CircuitVotingBatch:
-		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &votingbatch.BatchingVotingCircuit{})
+		votingCircuit, err := votingBatchCircuitFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, votingCircuit)
 	default:
 		return nil, fmt.Errorf("unknown circuit: %s", c)
 	}
+}
+
+func merkleCircuitFromEnv() (*merkleproof.MerkleProofCircuit, error) {
+	depthStr := os.Getenv("INC_TREE_DEPTH")
+	if depthStr == "" {
+		return nil, fmt.Errorf("INC_TREE_DEPTH is required to size the Merkle proof path")
+	}
+	depth, err := strconv.Atoi(depthStr)
+	if err != nil || depth < 1 {
+		return nil, fmt.Errorf("invalid INC_TREE_DEPTH %q", depthStr)
+	}
+
+	circuit := &merkleproof.MerkleProofCircuit{}
+	circuit.M.Path = make([]frontend.Variable, depth+1)
+	return circuit, nil
+}
+
+func votingBatchCircuitFromEnv() (*votingbatch.BatchingVotingCircuit, error) {
+	depthStr := os.Getenv("SPARSE_TREE_DEPTH")
+	if depthStr == "" {
+		return nil, fmt.Errorf("SPARSE_TREE_DEPTH is required to size the Merkle proof path")
+	}
+	depth, err := strconv.Atoi(depthStr)
+	if err != nil || depth < 1 {
+		return nil, fmt.Errorf("invalid SPARSE_TREE_DEPTH %q", depthStr)
+	}
+
+	batchStr := os.Getenv("BATCH_SIZE")
+	if batchStr == "" {
+		return nil, fmt.Errorf("BATCH_SIZE is required to size withdrawal request IDs")
+	}
+	batchSize, err := strconv.Atoi(batchStr)
+	if err != nil || batchSize < 1 {
+		return nil, fmt.Errorf("invalid BATCH_SIZE %q", batchStr)
+	}
+
+	circuit := &votingbatch.BatchingVotingCircuit{}
+	circuit.WithdrawalReqIDs = make([]frontend.Variable, batchSize)
+	circuit.Aggregator.MerkleProof.Path = make([]frontend.Variable, depth+1)
+	for i := 0; i < len(circuit.Validators); i++ {
+		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, depth+1)
+	}
+	return circuit, nil
 }

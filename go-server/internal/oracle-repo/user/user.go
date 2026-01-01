@@ -1,6 +1,11 @@
 package user
 
 import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/rand"
+	"fmt"
 	merkleproof "l2alchemy/circuits/merkle_proof"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
@@ -9,16 +14,14 @@ import (
 	"l2alchemy/internal/oracle-repo/gnark"
 	"l2alchemy/internal/oracle-repo/merkle"
 	"l2alchemy/internal/oracle-repo/util"
-
-	"bytes"
-	"context"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"fmt"
 	"log"
 	"math/big"
 	"reflect"
+	"sync"
 
+	"github.com/consensys/gnark-crypto/ecc"
+	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
+	"github.com/consensys/gnark-crypto/hash"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
@@ -30,13 +33,11 @@ import (
 	// This is used for key generation, signing, verifying (outside circuit)
 	eddsa "github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
 	// Used for assigning EdDSA witness variables (inside circuit)
-	"github.com/consensys/gnark-crypto/ecc"
-	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
-	"github.com/consensys/gnark-crypto/hash"
 )
 
 type User struct {
 	cfg             *config.Config
+	wg              *sync.WaitGroup
 	ecdsaPrivateKey *ecdsa.PrivateKey
 	ethClient       *ethclient.Client
 	IPFSClient      *db.IPFSClient
@@ -54,13 +55,6 @@ type User struct {
 	destinationIDBytes  []byte
 
 	Account *gnark.Account
-
-	GasCosts *GasCosts
-}
-
-type GasCosts struct {
-	BurnCost  uint64
-	ClaimCost uint64
 }
 
 type CircuitMemTime struct {
@@ -100,7 +94,6 @@ func NewUser(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 		Name:            name,
 		circuit:         circuit,
 		Account:         account,
-		GasCosts:        &GasCosts{},
 	}
 }
 
@@ -264,11 +257,6 @@ func (u *User) BurnTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	// calculate the commitment hash:
 	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash()
@@ -297,8 +285,6 @@ func (u *User) BurnTx() error {
 	u.nullifierHashBytes = nullifierHashBytes[:]
 	u.secretBytes = secretBytes[:]
 	u.destinationIDBytes = destinationIDBytes[:]
-
-	u.GasCosts.BurnCost = receipt.GasUsed
 
 	return nil
 }
@@ -343,9 +329,11 @@ func (u *User) WithdrawTx() error {
 	witness.DestinationID = new(big.Int).SetBytes(u.destinationIDBytes)
 
 	witness.Leaf = proofIndex
+	// witness.CommitmentHash = u.commitmentHashBytes
 	witness.NullifierHash = u.nullifierHashBytes
 	witness.M.RootHash = merkleRoot
 
+	witness.M.Path = make([]frontend.Variable, depth+1)
 	for i := 0; i < depth+1; i++ {
 		witness.M.Path[i] = frontend.Variable(new(big.Int).SetBytes(proofPath[i]))
 	}
@@ -361,7 +349,9 @@ func (u *User) WithdrawTx() error {
 	fmt.Printf("Secret: %x\n", witness.Secret)
 	fmt.Printf("DestinationID: %x\n", witness.DestinationID)
 	fmt.Printf("Leaf Index: %d\n", witness.Leaf)
+	// fmt.Printf("Commitment Hash: %x\n", witness.CommitmentHash)
 	fmt.Printf("Nullifier Hash: %x\n", witness.NullifierHash)
+
 	fmt.Printf("Merkle Root: %x\n", witness.M.RootHash)
 	for i, path := range witness.M.Path {
 		fmt.Printf("Merkle Path[%d]: %x\n", i, path)
@@ -377,7 +367,7 @@ func (u *User) WithdrawTx() error {
 		return fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
 	}
 
-	_ = groth16.Verify(proof, u.VK, publicWitness)
+	err = groth16.Verify(proof, u.VK, publicWitness)
 
 	// send trx to claim:
 	fmt.Printf("claiming (user=%v) ...\n", u.Name)
@@ -397,11 +387,6 @@ func (u *User) WithdrawTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatalf("failed to suggest gas price: %v", err)
-	}
-	trxOpts.GasPrice = gasPrice
 
 	var buf bytes.Buffer
 	_, err = proof.WriteTo(&buf)
@@ -432,8 +417,6 @@ func (u *User) WithdrawTx() error {
 
 	tokenOneBalance, tokenTwoBalance := u.GetBalance()
 	fmt.Printf("balance of user=%v: tokenOne=%v,tokenTwo=%v\n", u.Name, tokenOneBalance, tokenTwoBalance)
-
-	u.GasCosts.ClaimCost = receipt.GasUsed
 
 	return nil
 }

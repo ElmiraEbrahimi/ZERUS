@@ -5,13 +5,10 @@ import (
 	"github.com/consensys/gnark/std/hash/mimc"
 )
 
-// MerkleDepth is the fixed depth of the Merkle tree (number of levels of siblings).
-// Path[0] is the leaf; Path[1..MerkleDepth] are the sibling nodes.
-const MerkleDepth = 3
-
+// // MerkleProof represents the Merkle proof structure used in the circuit.
 type MerkleProof struct {
-	RootHash frontend.Variable                  `gnark:",public"` // Public: Merkle root
-	Path     [MerkleDepth + 1]frontend.Variable // leaf + MerkleDepth siblings
+	RootHash frontend.Variable   `gnark:",public"` // Public: Merkle root
+	Path     []frontend.Variable // Proof path (sibling hashes the first element is the leaf itself)
 }
 
 // MerkleProofCircuit represents the ZK circuit for verifying a Merkle proof.
@@ -23,9 +20,16 @@ type MerkleProofCircuit struct {
 	Secret        frontend.Variable // secret input
 	DestinationID frontend.Variable // Receiver's ID (could be a wallet address or identifier)
 
-	NullifierHash frontend.Variable `gnark:",public"`
+	NullifierHash frontend.Variable `gnark:",public"` // public output
+
 }
 
+// LeafSum calculates the hash for a leaf node.
+func LeafSumW(api frontend.API, h mimc.MiMC, data frontend.Variable) frontend.Variable {
+	h.Reset()
+	h.Write(data)
+	return h.Sum()
+}
 
 // nodeSum calculates the hash for a parent node from two children.
 func NodeSumW(api frontend.API, h mimc.MiMC, a, b frontend.Variable) frontend.Variable {
@@ -37,21 +41,21 @@ func NodeSumW(api frontend.API, h mimc.MiMC, a, b frontend.Variable) frontend.Va
 
 // VerifyProof defines the logic for verifying a Merkle proof.
 func (mp *MerkleProof) VerifyProofIncremental(api frontend.API, h mimc.MiMC, leaf frontend.Variable) {
-	depth := MerkleDepth
+	depth := len(mp.Path) - 1
 	sum := mp.Path[0]
 
-	// Binary decomposition of the leaf index determines the path.
-	// `leaf` is interpreted as the index of the leaf in the tree.
+	//  Binary decomposition of the leaf index determines the path
 	binLeaf := api.ToBinary(leaf, depth)
 	api.Println("[Circuit] Binary Leaf:", binLeaf)
 
-	for i := 1; i <= depth; i++ { // i up to depth, which matches Path[1..depth]
+	for i := 1; i < len(mp.Path); i++ {
 		h.Reset()
 		d1 := api.Select(binLeaf[i-1], mp.Path[i], sum)
 		d2 := api.Select(binLeaf[i-1], sum, mp.Path[i])
 		sum = NodeSumW(api, h, d1, d2)
 	}
 
+	// Check if the calculated root matches the provided root
 	api.Println("[Circuit] calculated rootHash", sum)
 	api.Println("[Withdrawer] calculated rootHash", mp.RootHash)
 	api.AssertIsEqual(sum, mp.RootHash)
@@ -64,7 +68,6 @@ func (circuit *MerkleProofCircuit) Define(api frontend.API) error {
 		return err
 	}
 
-	// Compute the nullifierHash
 	h.Reset()
 	h.Write(circuit.Nullifier)
 	nullifierHash := h.Sum()
@@ -80,7 +83,6 @@ func (circuit *MerkleProofCircuit) Define(api frontend.API) error {
 	h.Write(circuit.Nullifier)
 	h.Write(circuit.Secret)
 	h.Write(circuit.DestinationID)
-	// h.Write(circuit.Credentials)
 
 	hash := h.Sum()
 

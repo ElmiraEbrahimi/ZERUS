@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash"
+	votingbatch "l2alchemy/circuits/voting_batch"
 	"math/big"
 	"sync"
 
@@ -127,10 +128,10 @@ func (s *State) MerkleProof(i uint64) ([]byte, [][]byte, error) {
 }
 
 // MerkleProofBytes generates a Merkle proof for an account and returns the proof as `*big.Int` slices.
-func (s *State) MerkleProofBytes(i uint64) ([]byte, [MerkleTreeDepth + 1]*big.Int, error) {
+func (s *State) MerkleProofBytes(i uint64) ([]byte, [votingbatch.MerkleTreeDepth + 1]*big.Int, error) {
 	s.RLock()
 	defer s.RUnlock()
-	var path [MerkleTreeDepth + 1]*big.Int
+	var path [votingbatch.MerkleTreeDepth + 1]*big.Int
 	var stateBuf bytes.Buffer
 	_, err := stateBuf.Write(s.HData)
 	if err != nil {

@@ -14,15 +14,11 @@ contract Oracle is MerkleTree {
     uint256 constant INIT_TOKEN_CLAIM_AMOUNT = 0;
     uint256 public constant AGGREGATOR_REWARD = 500000000000000;
     uint256 public constant VALIDATOR_REWARD = 20000000000;
-    uint256 public constant INIT_REPUTATION = 50;
-    uint256 public constant INIT_SEVERITY_COUNT = 0;
 
     struct Account {
         uint256 index;
         PublicKey pubKey;
         uint256 balance;
-        uint256 reputation;
-        uint256 severityCount;
     }
 
     struct PublicKey {
@@ -80,18 +76,14 @@ contract Oracle is MerkleTree {
         uint256 validatorID,
         uint256 index,
         PublicKey pubkey,
-        uint256 balance,
-        uint256 reputation,
-        uint256 severityCount
+        uint256 balance
     );
 
     event Registered(
         address sender,
         uint256 index,
         PublicKey pubkey,
-        uint256 value,
-        uint256 reputation,
-        uint256 severityCount
+        uint256 value
     );
 
     event BurnSubmitted(bytes32 commitmentHash);
@@ -106,7 +98,9 @@ contract Oracle is MerkleTree {
     event WiVoteSubmitted(
         uint256 submitter,
         uint256 validators,
-        uint256 request
+        uint256 honestBits,
+        uint256 request,
+        uint256 majorityVote
     );
 
     event Replaced(address indexed sender, address indexed replaced);
@@ -143,9 +137,7 @@ contract Oracle is MerkleTree {
         Account memory account = Account(
             getNextLeafIndex(),
             publicKey,
-            msg.value,
-            INIT_REPUTATION,
-            INIT_SEVERITY_COUNT
+            msg.value
         );
         accounts[account.index] = msg.sender;
         uint256 accountHash = hashAccount(account);
@@ -161,18 +153,14 @@ contract Oracle is MerkleTree {
             validatorID,
             account.index,
             account.pubKey,
-            account.balance,
-            account.reputation,
-            account.severityCount
+            account.balance
         );
 
         emit Registered(
             msg.sender,
             account.index,
             account.pubKey,
-            account.balance,
-            account.reputation,
-            account.severityCount
+            account.balance
         );
     }
 
@@ -249,42 +237,38 @@ contract Oracle is MerkleTree {
         uint256 uniqueReqID,
         uint256 batchCommitment,
         uint256 validatorBits,
+        uint256 honestBits,
         uint256 vote,
         uint256 postStateRoot,
         uint256 postSeedX,
         uint256 postSeedY,
         uint256[8] memory proof
     ) public {
-        // console.log("index", index);
-        // console.log("uniqueReqID", uniqueReqID);
-        // console.log("validatorBits", validatorBits);
-        // console.log("vote", vote);
-        // console.log("postStateRoot", postStateRoot);
-        // console.log("postSeedX", postSeedX);
-        // console.log("postSeedY", postSeedY);
+        console.log("index", index);
+        console.log("uniqueReqID", uniqueReqID);
+        console.log("validatorBits", validatorBits);
+        console.log("vote", vote);
+        console.log("postStateRoot", postStateRoot);
+        console.log("postSeedX", postSeedX);
+        console.log("postSeedY", postSeedY);
 
-        // require(index == getAggregator(), "invalid aggregator");
         require(accounts[index] == msg.sender, "invalid index");
         require(wiVotes[uniqueReqID] == 0, "already submitted");
 
         wiVotes[uniqueReqID] = vote;
 
-        uint[15] memory input = [
+        uint[11] memory input = [
             postStateRoot,
             uniqueReqID, //  roundID
             batchCommitment,
             vote, // majority vote
             validatorBits,
+            honestBits,
             index,
             seedX,
             seedY,
             postSeedX,
-            postSeedY,
-            0,
-            0,
-            0,
-            0,
-            0
+            postSeedY
         ];
 
         console.log("verifying proof...");
@@ -295,7 +279,13 @@ contract Oracle is MerkleTree {
 
         console.log("setting state root");
         setRoot(postStateRoot);
-        emit WiVoteSubmitted(index, validatorBits, uniqueReqID);
+        emit WiVoteSubmitted(
+            index,
+            validatorBits,
+            honestBits,
+            uniqueReqID,
+            vote
+        );
     }
 
     // endregion
@@ -309,29 +299,22 @@ contract Oracle is MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) public payable {
-        // for (uint256 i = 0; i < path.length; i++) {
-        //     console.log(path[i]);
-        // }
+        for (uint256 i = 0; i < path.length; i++) {
+            console.log(path[i]);
+        }
 
-        // TODO: uncomment and remove below:
-        // require(msg.value >= toReplace.balance, "value too low");
+        // TODO: add here
+
         require(msg.value >= toReplace.balance || true, "value too low");
 
-        verify(path, leafIndex, depth); // TODO: remove and uncomment below:
-        // require(verify(path, leafIndex, depth), "account not included");
+        verify(path, leafIndex, depth);
 
-        hashAccount(toReplace); // TODO: remove and uncomment below:
-        // require(
-        //     path[0] == hashAccount(toReplace),
-        //     "leaf does not match account"
-        // );
+        hashAccount(toReplace);
 
         Account memory replaced = Account(
             toReplace.index,
             publicKey,
-            msg.value,
-            toReplace.reputation,
-            toReplace.severityCount
+            msg.value
         );
 
         update(hashAccount(replaced), path, leafIndex, depth);
@@ -357,11 +340,8 @@ contract Oracle is MerkleTree {
     ) public {
         require(accounts[account.index] == msg.sender, "wrong sender address");
 
-        // TODO: remove and uncomment below:
         hashAccount(account);
         verify(path, leafIndex, depth);
-        // require(path[0] == hashAccount(account), "leaf does not match account");
-        // require(verify(path, leafIndex, depth), "account not included");
 
         emit Exiting(msg.sender);
     }
@@ -378,13 +358,11 @@ contract Oracle is MerkleTree {
 
         hashAccount(account);
         verify(path, leafIndex, depth);
-        // require(path[0] == hashAccount(account), "leaf does not match account");
-        // require(verify(path, leafIndex, depth), "account not included");
 
         // payable(msg.sender).transfer(account.balance);
         delete accounts[account.index];
 
-        Account memory empty = Account(account.index, account.pubKey, 0, 0, 0);
+        Account memory empty = Account(account.index, account.pubKey, 0);
         update(hashAccount(empty), path, leafIndex, depth);
         emit Withdrawn(msg.sender);
     }
@@ -439,21 +417,17 @@ contract Oracle is MerkleTree {
     }
 
     function hashAccount(Account memory account) public pure returns (uint256) {
-        uint[] memory input = new uint[](6);
+        uint[] memory input = new uint[](4);
         input[0] = account.index;
         input[1] = account.pubKey.x;
         input[2] = account.pubKey.y;
         input[3] = account.balance;
-        input[4] = account.reputation;
-        input[5] = account.severityCount;
 
         console.log("***Solidity account.hash input:");
         console.log("  index         :", account.index);
         console.log("  pubKey.x      :", account.pubKey.x);
         console.log("  pubKey.y      :", account.pubKey.y);
         console.log("  balance       :", account.balance);
-        console.log("  reputation    :", account.reputation);
-        console.log("  severityCount :", account.severityCount);
         return MiMC.hash(input);
     }
 

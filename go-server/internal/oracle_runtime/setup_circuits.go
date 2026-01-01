@@ -18,6 +18,7 @@ import (
 func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleProofCircuit, constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey) {
 	log.Println("setting up merkle circuit...")
 	var circuit merkleproof.MerkleProofCircuit
+	circuit.M.Path = make([]frontend.Variable, cfg.IncTreeDepth+1)
 	for i := 0; i < len(circuit.M.Path); i++ {
 		circuit.M.Path[i] = 0
 	}

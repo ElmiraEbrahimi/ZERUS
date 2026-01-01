@@ -67,8 +67,6 @@ func AccountToOracleAccount(account *Account) *bc.OracleAccount {
 		Index:         util.ModToBn254(account.Index),
 		PubKey:        *PublicKeyToOraclePublicKey(account.PublicKey),
 		Balance:       util.ModToBn254(account.Balance),
-		Reputation:    util.ModToBn254(account.Reputation),
-		SeverityCount: util.ModToBn254(account.SeverityCount),
 	}
 }
 

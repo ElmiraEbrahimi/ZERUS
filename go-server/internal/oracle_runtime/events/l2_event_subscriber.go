@@ -332,15 +332,13 @@ func (l *L2ContractEventSubscriber) logValidatorRegistered(evlog types.Log) {
 		return
 	}
 	log.Printf(
-		"l2 event ValidatorRegistered: addr=%s validatorID=%s index=%s pubkey=(%s,%s) balance=%s reputation=%s severityCount=%s %s",
+		"l2 event ValidatorRegistered: addr=%s validatorID=%s index=%s pubkey=(%s,%s) balance=%s %s",
 		evt.Addr.Hex(),
 		evt.ValidatorID,
 		evt.Index,
 		evt.Pubkey.X,
 		evt.Pubkey.Y,
 		evt.Balance,
-		evt.Reputation,
-		evt.SeverityCount,
 		eventMeta(evlog),
 	)
 }
@@ -394,14 +392,12 @@ func (l *L2ContractEventSubscriber) logRegistered(evlog types.Log) {
 		return
 	}
 	log.Printf(
-		"l2 event Registered: sender=%s index=%s pubkey=(%s,%s) value=%s reputation=%s severityCount=%s %s",
+		"l2 event Registered: sender=%s index=%s pubkey=(%s,%s) value=%s %s",
 		evt.Sender.Hex(),
 		evt.Index,
 		evt.Pubkey.X,
 		evt.Pubkey.Y,
 		evt.Value,
-		evt.Reputation,
-		evt.SeverityCount,
 		eventMeta(evlog),
 	)
 }

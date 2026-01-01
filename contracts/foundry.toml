@@ -13,3 +13,6 @@ remappings = ["forge-std/=lib/forge-std/src/"]
 [profile.local]
 # rpc_url = "http://localhost:3051"
 chain_id = 271
+
+[lint]
+lint_on_build = false
