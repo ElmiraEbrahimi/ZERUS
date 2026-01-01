@@ -228,7 +228,7 @@ func (l *L2ContractEventSubscriber) fetchLatestBlock(ctx context.Context) (uint6
 
 func (l *L2ContractEventSubscriber) logEvent(evlog types.Log) {
 	name, indexed, nonIndexed, decodeErr := l.decodeEvent(evlog)
-	log.Printf("l2 event: %s %s topics=%d data=%d indexed=%v args=%v%s",
+	log.Printf("received l2 event: %s %s topics=%d data=%d indexed=%v args=%v%s",
 		name,
 		eventMeta(evlog),
 		len(evlog.Topics),
@@ -237,7 +237,7 @@ func (l *L2ContractEventSubscriber) logEvent(evlog types.Log) {
 		nonIndexed,
 		formatDecodeErr(decodeErr),
 	)
-	l.logTypedEvent(name, evlog)
+	l.handleTypedEvent(name, evlog)
 }
 
 func (l *L2ContractEventSubscriber) decodeEvent(evlog types.Log) (string, map[string]any, map[string]any, string) {
@@ -283,7 +283,7 @@ func (l *L2ContractEventSubscriber) decodeEvent(evlog types.Log) (string, map[st
 	return name, indexed, nonIndexed, decodeErr
 }
 
-func (l *L2ContractEventSubscriber) logTypedEvent(name string, evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Log) {
 	if l.filterer == nil {
 		return
 	}
