@@ -59,9 +59,10 @@ deploy-counter:
 
 .PHONY: gnark-merkle-verifier deploy-merkle-verifier \
 	gnark-votingbatch-verifier deploy-votingbatch-verifier
+FORCE_ZK_KEYGEN ?= 1
 gnark-merkle-verifier:
 	@echo "Generating MerkleProof Solidity verifier via gnark..."
-	@cd go-server && go run ./circuits/merkle_proof/cmd/gen_verifier/main.go
+	@cd go-server && FORCE_ZK_KEYGEN=$(FORCE_ZK_KEYGEN) go run ./circuits/merkle_proof/cmd/gen_verifier/main.go
 
 deploy-merkle-verifier: gnark-merkle-verifier
 	@echo "Deploying MerkleProofVerifier via forge-zksync..."
@@ -98,7 +99,7 @@ deploy-merkle-verifier: gnark-merkle-verifier
 
 gnark-votingbatch-verifier:
 	@echo "Generating VotingBatch Solidity verifier via gnark..."
-	@cd go-server && go run ./circuits/voting_batch/cmd/gen_votingbatch_verifier/main.go
+	@cd go-server && FORCE_ZK_KEYGEN=$(FORCE_ZK_KEYGEN) go run ./circuits/voting_batch/cmd/gen_votingbatch_verifier/main.go
 
 deploy-votingbatch-verifier: gnark-votingbatch-verifier
 	@echo "Deploying VotingBatchVerifier via forge-zksync..."

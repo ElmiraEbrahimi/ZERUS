@@ -3,8 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"l2alchemy/internal/oracle_runtime"
@@ -45,6 +49,26 @@ type balanceResponse struct {
 	User     string `json:"user"`
 	TokenOne uint   `json:"token_one"`
 	TokenTwo uint   `json:"token_two"`
+}
+
+type validatorActionRequest struct {
+	NodeID *uint `json:"node_id"`
+}
+
+type replaceAccountRequest struct {
+	NodeID               *uint   `json:"node_id"`
+	ReplaceWithAccountID *uint64 `json:"replace_with_account_id"`
+}
+
+type validatorActionResponse struct {
+	NodeID uint   `json:"node_id"`
+	Status string `json:"status"`
+}
+
+type replaceAccountResponse struct {
+	NodeID               uint   `json:"node_id"`
+	ReplaceWithAccountID uint64 `json:"replace_with_account_id"`
+	Status               string `json:"status"`
 }
 
 // RegisterDefaultUser handles POST /users/default/register by calling
@@ -191,4 +215,185 @@ func (h *OracleHandler) GetDefaultUserBalance(w http.ResponseWriter, r *http.Req
 		TokenOne: tokenOne,
 		TokenTwo: tokenTwo,
 	})
+}
+
+// ReplaceValidatorAccount handles POST /validators/replace by calling ReplaceAccountTx
+// for the selected validator node.
+func (h *OracleHandler) ReplaceValidatorAccount(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil || h.engine.Oracle == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	req := replaceAccountRequest{}
+	if err := decodeJSONBody(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	nodeID, err := parseNodeID(r, req.NodeID, h.engine.Oracle.AggregatorID)
+	if err != nil {
+		http.Error(w, "invalid node_id", http.StatusBadRequest)
+		return
+	}
+
+	replaceWithID, err := parseReplaceAccountID(r, req.ReplaceWithAccountID)
+	if err != nil {
+		http.Error(w, "replace_with_account_id is required", http.StatusBadRequest)
+		return
+	}
+
+	node := h.engine.Oracle.Nodes[nodeID]
+	if node == nil {
+		http.Error(w, "validator node not found", http.StatusNotFound)
+		return
+	}
+
+	if err := node.ReplaceAccountTx(replaceWithID); err != nil {
+		log.Printf("replace account node=%d failed: %v", nodeID, err)
+		http.Error(w, "failed to replace account", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(replaceAccountResponse{
+		NodeID:               nodeID,
+		ReplaceWithAccountID: replaceWithID,
+		Status:               "ok",
+	})
+}
+
+// ExitValidatorAccount handles POST /validators/exit by calling ExitTx
+// for the selected validator node.
+func (h *OracleHandler) ExitValidatorAccount(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil || h.engine.Oracle == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	req := validatorActionRequest{}
+	if err := decodeJSONBody(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	nodeID, err := parseNodeID(r, req.NodeID, h.engine.Oracle.AggregatorID)
+	if err != nil {
+		http.Error(w, "invalid node_id", http.StatusBadRequest)
+		return
+	}
+
+	node := h.engine.Oracle.Nodes[nodeID]
+	if node == nil {
+		http.Error(w, "validator node not found", http.StatusNotFound)
+		return
+	}
+
+	if err := node.ExitTx(); err != nil {
+		log.Printf("exit account node=%d failed: %v", nodeID, err)
+		http.Error(w, "failed to exit account", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(validatorActionResponse{
+		NodeID: nodeID,
+		Status: "ok",
+	})
+}
+
+// WithdrawValidatorAccount handles POST /validators/withdraw by calling WithdrawAccountTx
+// for the selected validator node.
+func (h *OracleHandler) WithdrawValidatorAccount(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil || h.engine.Oracle == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	req := validatorActionRequest{}
+	if err := decodeJSONBody(r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	nodeID, err := parseNodeID(r, req.NodeID, h.engine.Oracle.AggregatorID)
+	if err != nil {
+		http.Error(w, "invalid node_id", http.StatusBadRequest)
+		return
+	}
+
+	node := h.engine.Oracle.Nodes[nodeID]
+	if node == nil {
+		http.Error(w, "validator node not found", http.StatusNotFound)
+		return
+	}
+
+	if err := node.WithdrawAccountTx(); err != nil {
+		log.Printf("withdraw account node=%d failed: %v", nodeID, err)
+		http.Error(w, "failed to withdraw account", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(validatorActionResponse{
+		NodeID: nodeID,
+		Status: "ok",
+	})
+}
+
+func decodeJSONBody(r *http.Request, dst any) error {
+	if r == nil || r.Body == nil {
+		return nil
+	}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func parseNodeID(r *http.Request, bodyNodeID *uint, fallback uint) (uint, error) {
+	if bodyNodeID != nil {
+		return *bodyNodeID, nil
+	}
+	val, ok, err := parseUintQuery(r, "node_id")
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		return uint(val), nil
+	}
+	return fallback, nil
+}
+
+func parseReplaceAccountID(r *http.Request, bodyReplaceID *uint64) (uint64, error) {
+	if bodyReplaceID != nil {
+		return *bodyReplaceID, nil
+	}
+	val, ok, err := parseUintQuery(r, "replace_with_account_id")
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, errors.New("replace_with_account_id is required")
+	}
+	return val, nil
+}
+
+func parseUintQuery(r *http.Request, key string) (uint64, bool, error) {
+	if r == nil {
+		return 0, false, nil
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return 0, false, nil
+	}
+	val, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, true, err
+	}
+	return val, true, nil
 }

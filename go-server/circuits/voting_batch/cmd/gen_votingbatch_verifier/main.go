@@ -3,68 +3,27 @@ package main
 import (
 	"log"
 	"os"
-	"strconv"
+	"path/filepath"
+	"strings"
 
-	"github.com/consensys/gnark-crypto/ecc"
-	"github.com/consensys/gnark/backend/groth16"
-	"github.com/consensys/gnark/frontend"
-	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/joho/godotenv"
 
-	votingbatch "l2alchemy/circuits/voting_batch"
+	"l2alchemy/internal/zkkeys"
 )
 
 func main() {
 	_ = godotenv.Load(".env")
 	_ = godotenv.Load("../.env")
 
-	depthStr := os.Getenv("SPARSE_TREE_DEPTH")
-	if depthStr == "" {
-		log.Fatal("SPARSE_TREE_DEPTH is required to size the Merkle proof path")
+	keyDir := resolveKeyDir()
+	paths := zkkeys.PathsFor(keyDir, zkkeys.CircuitVotingBatch)
+	if err := os.MkdirAll(filepath.Dir(paths.PK), 0o755); err != nil {
+		log.Fatalf("mkdir %s: %v", filepath.Dir(paths.PK), err)
 	}
-	depth, err := strconv.Atoi(depthStr)
-	if err != nil || depth < 1 {
-		log.Fatalf("invalid SPARSE_TREE_DEPTH %q", depthStr)
-	}
-
-	batchStr := os.Getenv("BATCH_SIZE")
-	if batchStr == "" {
-		log.Fatal("BATCH_SIZE is required to size withdrawal request IDs")
-	}
-	batchSize, err := strconv.Atoi(batchStr)
-	if err != nil || batchSize < 1 {
-		log.Fatalf("invalid BATCH_SIZE %q", batchStr)
-	}
-
-	nodeCountStr := os.Getenv("NODE_COUNT")
-	if nodeCountStr == "" {
-		log.Fatal("NODE_COUNT is required to size validator list")
-	}
-	nodeCount, err := strconv.Atoi(nodeCountStr)
-	if err != nil || nodeCount < 1 {
-		log.Fatalf("invalid NODE_COUNT %q", nodeCountStr)
-	}
-
-	var circuit votingbatch.BatchingVotingCircuit
-	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, nodeCount)
-	circuit.WithdrawalReqIDs = make([]frontend.Variable, batchSize)
-	circuit.Aggregator.MerkleProof.Path = make([]frontend.Variable, depth+1)
-	for i := range circuit.Validators {
-		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, depth+1)
-	}
-
-	cs, err := frontend.Compile(
-		ecc.BN254.ScalarField(),
-		r1cs.NewBuilder,
-		&circuit,
-	)
+	force := strings.EqualFold(os.Getenv("FORCE_ZK_KEYGEN"), "1") || strings.EqualFold(os.Getenv("FORCE_ZK_KEYGEN"), "true")
+	_, _, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, paths.PK, paths.VK, force)
 	if err != nil {
-		log.Fatalf("compile circuit: %v", err)
-	}
-
-	_, vk, err := groth16.Setup(cs)
-	if err != nil {
-		log.Fatalf("setup: %v", err)
+		log.Fatalf("generate keys: %v", err)
 	}
 
 	outDir := "../contracts/src"
@@ -83,4 +42,15 @@ func main() {
 	}
 
 	log.Println("Generated contracts/src/VotingBatchVerifier.sol")
+}
+
+func resolveKeyDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return filepath.Join("circuits", "build", "keys")
+	}
+	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
+		return filepath.Join(wd, "go-server", "circuits", "build", "keys")
+	}
+	return filepath.Join(wd, "circuits", "build", "keys")
 }

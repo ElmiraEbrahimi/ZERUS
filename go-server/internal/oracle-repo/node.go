@@ -46,6 +46,11 @@ const (
 	Aggregator
 )
 
+var (
+	proofInvalidSelector          = crypto.Keccak256([]byte("ProofInvalid()"))[:4]
+	publicInputNotInFieldSelector = crypto.Keccak256([]byte("PublicInputNotInField()"))[:4]
+)
+
 type Node struct {
 	cfg *config.Config
 	wg  *sync.WaitGroup
@@ -571,6 +576,10 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	sort.Slice(batchIDs, func(i, j int) bool {
 		return batchIDs[i].Cmp(batchIDs[j]) < 0
 	})
+	if len(batchIDs) == 0 {
+		return nil, fmt.Errorf("empty withdrawal request batch")
+	}
+	roundID := new(big.Int).Set(batchIDs[0])
 
 	positions := make(map[string]int, len(batchIDs))
 	for i, id := range batchIDs {
@@ -729,7 +738,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 			new(big.Int).Set(vote.Index),
 			new(big.Int).SetBytes(batchCommitment[:32]),
 			new(big.Int).Set(validatorVoteMask),
-			new(big.Int).SetInt64(int64(n.Oracle.RoundID)),
+			new(big.Int).Set(roundID),
 		)
 
 		// 3. Re-sign the vote (this can be for validation or to force resync)
@@ -862,7 +871,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	assignment := votingbatch.BatchingVotingCircuit{
 		ResultingStateRoot: postStateRoot,
 		//RoundID:            n.Oracle.RoundID,
-		RoundID:          new(big.Int).SetInt64(int64(n.Oracle.RoundID)),
+		RoundID:          new(big.Int).Set(roundID),
 		BatchCommitment:  batchCommitment[:32],
 		MajorityVote:     new(big.Int).Set(majorityVote),
 		ValidatorBits:    new(big.Int).Set(validatorBits),
@@ -874,7 +883,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 
 	// Print all variables used in the assignment
 	fmt.Printf("ResultingStateRoot: %v\n", postStateRoot)
-	fmt.Printf("RoundID: %v\n", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
+	fmt.Printf("RoundID: %v\n", new(big.Int).Set(roundID))
 	fmt.Printf("BatchCommitment: %v\n", batchCommitment[:32])
 	fmt.Printf("MajorityVote: %v\n", new(big.Int).Set(majorityVote))
 	fmt.Printf("ValidatorBits: %v\n", new(big.Int).Set(validatorBits))
@@ -918,8 +927,8 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	fmt.Println(" --- Scalar Field Check Complete --- ")
 
 	check("aggregator account index", n.Account.Index)
-	check("slashedValIndex", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
-	check("uniqueReqID", new(big.Int).SetInt64(int64(n.Oracle.RoundID)))
+	check("slashedValIndex", roundID)
+	check("uniqueReqID", roundID)
 	check("postStateRoot", new(big.Int).SetBytes(postStateRoot))
 	check("postSeedX", postSeedX)
 	check("postSeedY", postSeedY)
@@ -927,9 +936,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	check("majorityVote", majorityVote)
 	check("validatorBits", validatorBits)
 
-	n.aggregatorSubmitWiVoteTx(
+	if err := n.aggregatorSubmitWiVoteTx(
 		n.Account.Index,
-		new(big.Int).SetInt64(int64(n.Oracle.RoundID)), // Pass the first element of the slice as an example
+		roundID,
 		new(big.Int).SetBytes(batchCommitment[:32]),
 		validatorBits,
 		honestBits, // NEW
@@ -938,7 +947,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		postSeedX,
 		postSeedY,
 		proof.Proof,
-	)
+	); err != nil {
+		return nil, err
+	}
 
 	fmt.Println("aggregatorSubmitWiVoteTx submitted successfully")
 
@@ -1150,11 +1161,35 @@ func (n *Node) revertReason(ctx context.Context, tx *types.Transaction, blockNum
 	if err != nil && len(data) == 0 {
 		return "", err.Error()
 	}
-	reason, err := abi.UnpackRevert(data)
-	if err != nil {
+	if len(data) == 0 {
 		return "", ""
 	}
-	return reason, ""
+	if reason := decodeRevertData(data); reason != "" {
+		return reason, ""
+	}
+	return fmt.Sprintf("reverted (data=0x%x)", data), ""
+}
+
+func decodeRevertData(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	reason, err := abi.UnpackRevert(data)
+	if err == nil && strings.TrimSpace(reason) != "" {
+		return reason
+	}
+	if len(data) < 4 {
+		return ""
+	}
+	selector := data[:4]
+	switch {
+	case bytes.Equal(selector, proofInvalidSelector):
+		return "ProofInvalid"
+	case bytes.Equal(selector, publicInputNotInFieldSelector):
+		return "PublicInputNotInField"
+	default:
+		return fmt.Sprintf("custom error 0x%x (data=0x%x)", selector, data)
+	}
 }
 
 func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
@@ -1236,7 +1271,17 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	if receipt.Status == 1 {
 		fmt.Printf("successfully submitted wivote (node=%v)\n", n.ID)
 	} else {
-		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
+		fmt.Printf("Transaction failed (node=%v)\n", n.ID)
+		revertReason, callErr := n.revertReason(context.Background(), tx, receipt.BlockNumber)
+		if revertReason != "" {
+			log.Printf("submit wivote reverted (node=%v tx=%s): %s", n.ID, tx.Hash().Hex(), revertReason)
+			return fmt.Errorf("submit wivote failed (node=%v tx=%s revert=%s)", n.ID, tx.Hash().Hex(), revertReason)
+		}
+		if callErr != "" {
+			log.Printf("submit wivote call failed (node=%v tx=%s): %s", n.ID, tx.Hash().Hex(), callErr)
+			return fmt.Errorf("submit wivote failed (node=%v tx=%s call_err=%s)", n.ID, tx.Hash().Hex(), callErr)
+		}
+		return fmt.Errorf("submit wivote failed (node=%v tx=%s)", n.ID, tx.Hash().Hex())
 	}
 
 	return nil
@@ -1298,14 +1343,17 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	}
 
 	// 5. Wait for confirmation
-	receipt, err := bind.WaitMined(context.Background(), n.ethClient, tx)
+	receipt, err := bc.WaitMinedAndLogTxReceipt(
+		context.Background(),
+		n.ethClient,
+		fmt.Sprintf("replace account index=%d", account.Index.Uint64()),
+		tx,
+	)
 	if err != nil {
 		log.Fatalf("failed to wait for replace tx (index=%d): %v", account.Index.Uint64(), err)
 	}
 
-	if receipt.Status == 1 {
-		bc.LogTxReceipt(fmt.Sprintf("replace account index=%d", account.Index.Uint64()), tx, receipt)
-	} else {
+	if receipt.Status != 1 {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
 
@@ -1362,14 +1410,17 @@ func (n *Node) ExitTx() error {
 	}
 
 	// 5. Wait for confirmation
-	receipt, err := bind.WaitMined(context.Background(), n.ethClient, tx)
+	receipt, err := bc.WaitMinedAndLogTxReceipt(
+		context.Background(),
+		n.ethClient,
+		fmt.Sprintf("exit account index=%d", account.Index.Uint64()),
+		tx,
+	)
 	if err != nil {
 		log.Fatalf("failed to wait for exit tx (index=%d): %v", account.Index.Uint64(), err)
 	}
 
-	if receipt.Status == 1 {
-		bc.LogTxReceipt(fmt.Sprintf("exit account index=%d", account.Index.Uint64()), tx, receipt)
-	} else {
+	if receipt.Status != 1 {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
 
@@ -1425,11 +1476,15 @@ func (n *Node) WithdrawAccountTx() error {
 	}
 
 	// 5. Wait for confirmation
-	receipt, err := bind.WaitMined(context.Background(), n.ethClient, tx)
+	receipt, err := bc.WaitMinedAndLogTxReceipt(
+		context.Background(),
+		n.ethClient,
+		fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()),
+		tx,
+	)
 	if err != nil {
 		log.Fatalf("failed to wait for withdraw tx (index=%d): %v", account.Index.Uint64(), err)
 	}
-	bc.LogTxReceipt(fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()), tx, receipt)
 
 	if receipt.Status == 1 {
 		log.Printf("withdrawn account index=%d", account.Index.Uint64())

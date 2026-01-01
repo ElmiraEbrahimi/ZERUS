@@ -1,6 +1,7 @@
 package oracle_runtime
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -29,7 +30,10 @@ func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleP
 	if err := os.MkdirAll(filepath.Dir(pkPath), 0o755); err != nil {
 		panic(err)
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, true)
+	if !fileExists(pkPath) || !fileExists(vkPath) {
+		panic(fmt.Errorf("merkle keys missing (pk=%s vk=%s); run `make generate` or `make deploy`", pkPath, vkPath))
+	}
+	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, false)
 	if err != nil {
 		panic(err)
 	}
@@ -57,11 +61,19 @@ func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.Batchin
 	if err := os.MkdirAll(filepath.Dir(pkPath), 0o755); err != nil {
 		panic(err)
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, true)
+	if !fileExists(pkPath) || !fileExists(vkPath) {
+		panic(fmt.Errorf("voting batch keys missing (pk=%s vk=%s); run `make generate` or `make deploy`", pkPath, vkPath))
+	}
+	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, false)
 	if err != nil {
 		panic(err)
 	}
 	log.Println("completed set up voting circuit")
 
 	return &circuit, _r1cs, pk, vk
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
 }

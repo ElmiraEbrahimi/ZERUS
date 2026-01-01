@@ -141,6 +141,9 @@ curl http://localhost:18000/users/default/balance
 | POST   | /users/default/burn     | `curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"`     |
 | POST   | /users/default/withdraw | `curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"` |
 | POST   | /validators/register    | `curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"`    |
+| POST   | /validators/replace     | `curl -X POST http://localhost:18000/validators/replace -H "Content-Type: application/json" -d '{"node_id":0,"replace_with_account_id":1}'` |
+| POST   | /validators/exit        | `curl -X POST http://localhost:18000/validators/exit -H "Content-Type: application/json" -d '{"node_id":0}'` |
+| POST   | /validators/withdraw    | `curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: application/json" -d '{"node_id":0}'` |
 
 Notes:
 - `GET /users/default/balance` returns `token_one` = burn balance, `token_two` = claim balance.

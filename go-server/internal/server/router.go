@@ -110,5 +110,32 @@ func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *ha
 			}
 			oracle.RegisterValidators(w, r)
 		})
+
+		// POST /validators/replace triggers ReplaceAccountTx for a validator node.
+		mux.HandleFunc("/validators/replace", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.ReplaceValidatorAccount(w, r)
+		})
+
+		// POST /validators/exit triggers ExitTx for a validator node.
+		mux.HandleFunc("/validators/exit", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.ExitValidatorAccount(w, r)
+		})
+
+		// POST /validators/withdraw triggers WithdrawAccountTx for a validator node.
+		mux.HandleFunc("/validators/withdraw", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.WithdrawValidatorAccount(w, r)
+		})
 	}
 }
