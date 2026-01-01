@@ -9,6 +9,7 @@ import (
 
 	"l2alchemy/circuits/merkle_proof"
 	"l2alchemy/circuits/voting_batch"
+	"l2alchemy/internal/memtime"
 
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
@@ -56,7 +57,10 @@ func GenerateKeysToFiles(c CircuitName, pkPath, vkPath string, force bool) (cons
 	runtime.ReadMemStats(&m1)
 	started := time.Now()
 
+	compileLabel := fmt.Sprintf("frontend.Compile %s", c)
+	compileSample := memtime.Start(compileLabel)
 	cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
+	compileSample.End()
 	if err != nil {
 		return nil, nil, nil, 0, 0, fmt.Errorf("compile %s: %w", c, err)
 	}
@@ -179,13 +183,19 @@ func CompileOnly(c CircuitName) (constraint.ConstraintSystem, error) {
 		if err != nil {
 			return nil, err
 		}
-		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, merkleCircuit)
+		sample := memtime.Start("frontend.Compile merkle_proof")
+		cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, merkleCircuit)
+		sample.End()
+		return cs, err
 	case CircuitVotingBatch:
 		votingCircuit, err := votingBatchCircuitFromEnv()
 		if err != nil {
 			return nil, err
 		}
-		return frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, votingCircuit)
+		sample := memtime.Start("frontend.Compile voting_batch")
+		cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, votingCircuit)
+		sample.End()
+		return cs, err
 	default:
 		return nil, fmt.Errorf("unknown circuit: %s", c)
 	}

@@ -39,14 +39,9 @@ type Config struct {
 	NodePK      string `env:"NODE_PK,required"`
 
 	ChainID                 int64 `env:"ZKSYNC_CHAIN_ID,required"`
-	RoundDurationMS         int   `env:"ROUND_DURATION_MILI_SECONDS,required"`
 	NodeCount               int   `env:"NODE_COUNT,required"`
 	SparseTreeDepth         int   `env:"SPARSE_TREE_DEPTH,required"`
 	BatchSize               int   `env:"BATCH_SIZE,required"`
-	RoundToChangeAggregator int   `env:"ROUND_TO_CHANGE_AGGREGATOR,required"`
-	RoundLimit              int   `env:"ROUND_LIMIT,required"`
-	RoundIncVoteSelection   int   `env:"ROUND_INCVOTE_SELECTION,required"`
-	RoundWiVoteSelection    int   `env:"ROUND_WIVOTE_SELECTION,required"`
 	IncTreeDepth            int   `env:"INC_TREE_DEPTH,required"`
 	TxGasLimit              int64 `env:"TX_GAS_LIMIT" default:"3000000"`
 	TxGasPriceWei           int64 `env:"TX_GAS_PRICE_WEI" default:"20000000000"`

@@ -12,6 +12,7 @@ import (
 	"l2alchemy/circuits/merkle_proof"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
+	"l2alchemy/internal/memtime"
 	"l2alchemy/internal/oracle-repo"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
@@ -519,7 +520,9 @@ func (u *User) WithdrawTx() (string, error) {
 		fmt.Printf("Merkle Path[%d]: %x\n", i, path)
 	}
 
+	proveSample := memtime.Start("groth16.Prove merkle_proof")
 	proof, err := groth16.Prove(u.R1CS, u.PK, fullWitness)
+	proveSample.End()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate Groth16 proof (user=%v): %v", u.Name, err)
 	}
@@ -529,7 +532,10 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
 	}
 
-	if err := groth16.Verify(proof, u.VK, publicWitness); err != nil {
+	verifySample := memtime.Start("groth16.Verify merkle_proof")
+	err = groth16.Verify(proof, u.VK, publicWitness)
+	verifySample.End()
+	if err != nil {
 		return "", fmt.Errorf("failed to verify proof (user=%v): %v", u.Name, err)
 	}
 

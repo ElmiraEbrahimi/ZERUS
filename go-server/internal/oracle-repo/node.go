@@ -14,6 +14,7 @@ import (
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
+	"l2alchemy/internal/memtime"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
 	"l2alchemy/internal/oracle-repo/merkle"
@@ -278,7 +279,9 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 	}
 
 	var isApproved *big.Int
+	verifySample := memtime.Start("groth16.Verify inc_claim")
 	err = groth16.Verify(proof, n.Oracle.IncVK, publicWitness)
+	verifySample.End()
 
 	if err != nil {
 		fmt.Printf("failed to verify claim proof (node=%v): %v\n", n.ID, err)
@@ -884,7 +887,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("create witness: %w", err)
 	}
 
+	proveSample := memtime.Start("groth16.Prove voting_batch")
 	p, err := groth16.Prove(n.Oracle.SparseR1CS, n.Oracle.SparsePK, witness)
+	proveSample.End()
 	if err != nil {
 		return nil, fmt.Errorf("prove: %v", err)
 	}
@@ -894,7 +899,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("public witness: %w", err)
 	}
 
+	verifySample := memtime.Start("groth16.Verify voting_batch")
 	err = groth16.Verify(p, n.Oracle.SparseVK, pw) // TODO: delete maybe later
+	verifySample.End()
 	if err != nil {
 		return nil, fmt.Errorf("verify proof: %w", err)
 	}

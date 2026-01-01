@@ -2,23 +2,33 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
 	"l2alchemy/internal/logging"
+	"l2alchemy/internal/memtime"
 	"l2alchemy/internal/oracle_runtime"
 	"l2alchemy/internal/oracle_runtime/events"
 	"l2alchemy/internal/server/handlers"
 	"l2alchemy/internal/zkkeys"
 
 	servers "l2alchemy/internal/server"
+)
+
+var (
+	txCSVPathMu    sync.Mutex
+	txCSVPathCache = map[string]string{}
 )
 
 func main() {
@@ -39,6 +49,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to load configuration: %v", err)
 	}
+
+	txCSVPath := resolveTxCSVLogFile(cfg.NodeCount, cfg.BatchSize)
+	if _, err := eth.SetupTxReceiptCSV(txCSVPath); err != nil {
+		log.Fatalf("failed to set up tx receipt csv logging: %v", err)
+	}
+	defer eth.CloseTxReceiptCSV()
+
+	memTimePath := memtime.ResolveMemTimeCSVPath(cfg.NodeCount, cfg.BatchSize)
+	if _, err := memtime.SetupMemTimeCSV(memTimePath); err != nil {
+		log.Fatalf("failed to set up memtime csv logging: %v", err)
+	}
+	defer memtime.CloseMemTimeCSV()
 
 	ctx := context.Background()
 	counterClient, err := eth.NewCounterClient(ctx, cfg.RPCURL, cfg.ChainID, cfg.PrivateKey, cfg.CounterContractAddress)
@@ -126,4 +148,63 @@ func resolveLogFile() string {
 	}
 	// Otherwise assume current working dir is go-server/.
 	return filepath.Join(wd, "logs", "server.log")
+}
+
+func resolveTxCSVLogFile(nodeCount, batchSize int) string {
+	key := fmt.Sprintf("n%d_b%d", nodeCount, batchSize)
+
+	txCSVPathMu.Lock()
+	if path, ok := txCSVPathCache[key]; ok {
+		txCSVPathMu.Unlock()
+		return path
+	}
+	txCSVPathMu.Unlock()
+
+	wd, err := os.Getwd()
+	var dir string
+	if err != nil {
+		dir = filepath.Join("logs")
+	} else if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
+		dir = filepath.Join(wd, "go-server", "logs")
+	} else {
+		dir = filepath.Join(wd, "logs")
+	}
+
+	prefix := fmt.Sprintf("n%d_b%d_", nodeCount, batchSize)
+	counter := nextCSVCounter(dir, prefix)
+	path := filepath.Join(dir, fmt.Sprintf("%s%d.csv", prefix, counter))
+
+	txCSVPathMu.Lock()
+	txCSVPathCache[key] = path
+	txCSVPathMu.Unlock()
+
+	return path
+}
+
+func nextCSVCounter(dir, prefix string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 1
+	}
+
+	max := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".csv") {
+			continue
+		}
+		numStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".csv")
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+
+	return max + 1
 }

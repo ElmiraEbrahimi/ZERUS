@@ -8,3 +8,9 @@ local-setup/.DS_Store
 *.zip
 
 *.log
+
+MerkleProofVerifier.sol
+VotingBatchVerifier.sol
+
+*.csv
+
