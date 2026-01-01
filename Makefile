@@ -210,3 +210,18 @@ zip:
 		-x ".git/*" \
 		-x "go-server/circuits/build/*" \
 		-x "*.zip"
+
+
+.PHONY: simulate
+simulate:
+	curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json" && \
+	sleep 1 && \
+	curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json" && \
+	sleep 1 && \
+	curl http://localhost:18000/users/default/balance && \
+	sleep 1 && \
+	curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json" && \
+	sleep 1 && \
+	curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json" && \
+	sleep 1 && \
+	curl http://localhost:18000/users/default/balance

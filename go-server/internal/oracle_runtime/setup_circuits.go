@@ -29,7 +29,7 @@ func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleP
 	if err := os.MkdirAll(filepath.Dir(pkPath), 0o755); err != nil {
 		panic(err)
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, false)
+	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, true)
 	if err != nil {
 		panic(err)
 	}
@@ -59,7 +59,7 @@ func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.Batchin
 	if err := os.MkdirAll(filepath.Dir(pkPath), 0o755); err != nil {
 		panic(err)
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, false)
+	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, true)
 	if err != nil {
 		panic(err)
 	}

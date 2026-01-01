@@ -75,6 +75,9 @@ func Load(printVals bool) (*Config, error) {
 	if err := bindEnv(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
 
 	if printVals {
 		printEnvValues(cfg)
@@ -189,6 +192,26 @@ func setValue(field reflect.Value, key, raw string) error {
 	default:
 		return fmt.Errorf("unsupported field kind %s for env var %s", field.Kind(), key)
 	}
+}
+
+func validateConfig(cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if cfg.OracleLevels != cfg.SparseTreeDepth {
+		return fmt.Errorf("ORACLE_LEVELS=%d must match SPARSE_TREE_DEPTH=%d", cfg.OracleLevels, cfg.SparseTreeDepth)
+	}
+	if cfg.NodeCount < 1 {
+		return fmt.Errorf("NODE_COUNT must be >= 1")
+	}
+	minDepth := 0
+	for (1 << minDepth) < cfg.NodeCount {
+		minDepth++
+	}
+	if cfg.SparseTreeDepth < minDepth {
+		return fmt.Errorf("SPARSE_TREE_DEPTH=%d too small for NODE_COUNT=%d (need at least %d)", cfg.SparseTreeDepth, cfg.NodeCount, minDepth)
+	}
+	return nil
 }
 func printEnvValues(cfg *Config) {
 	v := reflect.ValueOf(cfg).Elem()

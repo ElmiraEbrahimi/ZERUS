@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"hash"
-	votingbatch "l2alchemy/circuits/voting_batch"
 	"math/big"
 	"sync"
+
+	"l2alchemy/internal/oracle-repo/util"
 
 	"github.com/consensys/gnark-crypto/accumulator/merkletree"
 )
@@ -31,11 +32,10 @@ func NewState(hFunc hash.Hash, accounts []*Account) (*State, error) {
 		hFunc.Reset()
 
 		accountData := account.Serialize()
-		_, err := hFunc.Write(accountData)
+		s, err := hashAccountForMerkle(hFunc, account)
 		if err != nil {
 			return nil, fmt.Errorf("hash account: %w", err)
 		}
-		s := hFunc.Sum(nil)
 
 		copy(data[i*AccountSize:(i+1)*AccountSize], accountData)
 		copy(hData[i*hFunc.Size():(i+1)*hFunc.Size()], s)
@@ -55,15 +55,13 @@ func (s *State) WriteAccount(account Account) error {
 
 	i := int(account.Index.Int64())
 	accountData := account.Serialize()
-
 	copy(s.Data[i*AccountSize:], accountData)
 
-	s.hFunc.Reset()
-	_, err := s.hFunc.Write(accountData)
+	sHash, err := hashAccountForMerkle(s.hFunc, &account)
 	if err != nil {
 		return fmt.Errorf("hash account: %w", err)
 	}
-	copy(s.HData[i*s.hFunc.Size():(i+1)*s.hFunc.Size()], s.hFunc.Sum(nil))
+	copy(s.HData[i*s.hFunc.Size():(i+1)*s.hFunc.Size()], sHash)
 
 	return nil
 }
@@ -128,10 +126,10 @@ func (s *State) MerkleProof(i uint64) ([]byte, [][]byte, error) {
 }
 
 // MerkleProofBytes generates a Merkle proof for an account and returns the proof as `*big.Int` slices.
-func (s *State) MerkleProofBytes(i uint64) ([]byte, [votingbatch.MerkleTreeDepth + 1]*big.Int, error) {
+func (s *State) MerkleProofBytes(i uint64) ([]byte, []*big.Int, error) {
 	s.RLock()
 	defer s.RUnlock()
-	var path [votingbatch.MerkleTreeDepth + 1]*big.Int
+	path := make([]*big.Int, 0)
 	var stateBuf bytes.Buffer
 	_, err := stateBuf.Write(s.HData)
 	if err != nil {
@@ -141,6 +139,7 @@ func (s *State) MerkleProofBytes(i uint64) ([]byte, [votingbatch.MerkleTreeDepth
 	if err != nil {
 		return nil, path, fmt.Errorf("failed to build Merkle proof: %v", err)
 	}
+	path = make([]*big.Int, len(proofSet))
 	for i := 0; i < len(proofSet); i++ {
 		path[i] = big.NewInt(0).SetBytes(proofSet[i])
 	}
@@ -159,4 +158,26 @@ func (s *State) SetHData(hData []byte) {
 	s.Lock()
 	defer s.Unlock()
 	s.HData = hData
+}
+
+func hashAccountForMerkle(hFunc hash.Hash, account *Account) ([]byte, error) {
+	if account == nil || account.PublicKey == nil {
+		return nil, fmt.Errorf("account or public key is nil")
+	}
+	hFunc.Reset()
+	if _, err := hFunc.Write(util.PadOrTrim(account.Index.Bytes(), SegmentSize)); err != nil {
+		return nil, err
+	}
+	pkX := account.PublicKey.A.X.Bytes()
+	pkY := account.PublicKey.A.Y.Bytes()
+	if _, err := hFunc.Write(pkX[:]); err != nil {
+		return nil, err
+	}
+	if _, err := hFunc.Write(pkY[:]); err != nil {
+		return nil, err
+	}
+	if _, err := hFunc.Write(util.PadOrTrim(account.Balance.Bytes(), SegmentSize)); err != nil {
+		return nil, err
+	}
+	return hFunc.Sum(nil), nil
 }
