@@ -18,6 +18,7 @@ import (
 	"l2alchemy/internal/oracle-repo/merkle"
 	"l2alchemy/internal/oracle-repo/util"
 	"log"
+	"math/bits"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -156,28 +157,35 @@ func NewUser(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 // 	}()
 // }
 
-func (u *User) GetBalance() (uint, uint) {
+func (u *User) GetBalance() (uint, uint, error) {
 	fmt.Printf("getting balance for user=%v ...\n", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
-		log.Fatalf("create contract client instance: %v", err)
+		return 0, 0, fmt.Errorf("create contract client instance: %w", err)
 	}
 	chainID := big.NewInt(u.cfg.ChainID)
 	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
 	if err != nil {
-		log.Fatalf("failed to create keyed transactor: %v", err)
+		return 0, 0, fmt.Errorf("failed to create keyed transactor: %w", err)
 	}
 	callOpts := &bind.CallOpts{
 		Context: context.Background(),
 		From:    trxOpts.From,
 	}
-	tokenOneBalance, tokenTwoBalance, err := bcClient.ViewBalance(callOpts)
+	burnBalance, claimBalance, err := bcClient.ViewBalance(callOpts)
 	if err != nil {
-		log.Fatalf("call ViewBalance() function: %v", err)
+		return 0, 0, fmt.Errorf("call ViewBalance() function: %w", err)
 	}
 
-	return uint(tokenOneBalance.Uint64()), uint(tokenTwoBalance.Uint64())
+	if burnBalance.BitLen() > bits.UintSize {
+		return 0, 0, fmt.Errorf("burn balance overflows uint")
+	}
+	if claimBalance.BitLen() > bits.UintSize {
+		return 0, 0, fmt.Errorf("claim balance overflows uint")
+	}
+
+	return uint(burnBalance.Uint64()), uint(claimBalance.Uint64()), nil
 }
 
 func (u *User) statePath() string {
@@ -358,6 +366,10 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 
 func (u *User) BurnTx() (string, string, error) {
 	log.Printf("user=%v is burning...", u.Name)
+	preBurnBalance, preClaimBalance, err := u.GetBalance()
+	if err != nil {
+		return "", "", fmt.Errorf("fetch pre-burn balance (user=%v): %w", u.Name, err)
+	}
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
@@ -402,6 +414,18 @@ func (u *User) BurnTx() (string, string, error) {
 	}
 	log.Printf("successfully burned from user=%v", u.Name)
 
+	postBurnBalance, postClaimBalance, err := u.GetBalance()
+	if err != nil {
+		return "", "", fmt.Errorf("fetch post-burn balance (user=%v): %w", u.Name, err)
+	}
+	if postBurnBalance >= preBurnBalance {
+		return "", "", fmt.Errorf("burn did not decrease burn balance (user=%v before=%d after=%d)", u.Name, preBurnBalance, postBurnBalance)
+	}
+	if postClaimBalance != preClaimBalance {
+		return "", "", fmt.Errorf("burn unexpectedly changed claim balance (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
+	}
+	log.Printf("burn balances user=%v burn=%d->%d claim=%d", u.Name, preBurnBalance, postBurnBalance, postClaimBalance)
+
 	// save the calculated values:
 	u.commitmentHashBytes = commitmentHashBytes[:]
 	u.nullifierBytes = nullifierBytes[:]
@@ -416,6 +440,10 @@ func (u *User) BurnTx() (string, string, error) {
 }
 
 func (u *User) WithdrawTx() (string, error) {
+	preBurnBalance, preClaimBalance, err := u.GetBalance()
+	if err != nil {
+		return "", fmt.Errorf("fetch pre-withdraw balance (user=%v): %w", u.Name, err)
+	}
 	if len(u.commitmentHashBytes) == 0 {
 		if err := u.loadState(); err != nil {
 			return "", fmt.Errorf("failed to load persisted user state (user=%v): %w", u.Name, err)
@@ -558,8 +586,17 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
 
-	tokenOneBalance, tokenTwoBalance := u.GetBalance()
-	fmt.Printf("balance of user=%v: tokenOne=%v,tokenTwo=%v\n", u.Name, tokenOneBalance, tokenTwoBalance)
+	postBurnBalance, postClaimBalance, err := u.GetBalance()
+	if err != nil {
+		return "", fmt.Errorf("fetch post-withdraw balance (user=%v): %w", u.Name, err)
+	}
+	if postBurnBalance != preBurnBalance {
+		return "", fmt.Errorf("withdraw unexpectedly changed burn balance (user=%v before=%d after=%d)", u.Name, preBurnBalance, postBurnBalance)
+	}
+	if postClaimBalance <= preClaimBalance {
+		return "", fmt.Errorf("withdraw did not increase claim balance (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
+	}
+	log.Printf("withdraw balances user=%v burn=%d claim=%d->%d", u.Name, postBurnBalance, preClaimBalance, postClaimBalance)
 
 	return tx.Hash().Hex(), nil
 }

@@ -75,10 +75,17 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("starting server on %s", cfg.HTTPBindAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen error: %v", err)
 		}
+	}()
+	const serverStartLogWait = 1 * time.Second
+	go func() {
+		select {
+		case <-l2Subscriber.Ready():
+		case <-time.After(serverStartLogWait):
+		}
+		log.Printf("starting server on %s", cfg.HTTPBindAddr)
 	}()
 
 	stop := make(chan os.Signal, 1)

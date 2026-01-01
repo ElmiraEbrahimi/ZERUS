@@ -141,3 +141,6 @@ curl http://localhost:18000/users/default/balance
 | POST   | /users/default/burn     | `curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"`     |
 | POST   | /users/default/withdraw | `curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"` |
 | POST   | /validators/register    | `curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"`    |
+
+Notes:
+- `GET /users/default/balance` returns `token_one` = burn balance, `token_two` = claim balance.

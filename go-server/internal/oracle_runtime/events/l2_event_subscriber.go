@@ -34,9 +34,11 @@ type L2ContractEventSubscriber struct {
 	contractABI  abi.ABI
 	filterer     *eth.OracleFilterer
 
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu        sync.Mutex
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	readyOnce sync.Once
+	readyCh   chan struct{}
 }
 
 // NewL2ContractEventSubscriber constructs a subscriber bound to the configured L2 Oracle
@@ -70,12 +72,25 @@ func NewL2ContractEventSubscriber(engine *oracle_runtime.OracleEngine) (*L2Contr
 		contractAddr: contractAddr,
 		contractABI:  parsedABI,
 		filterer:     filterer,
+		readyCh:      make(chan struct{}),
 	}, nil
 }
 
 // Engine returns the oracle engine instance owned by this subscriber.
 func (l *L2ContractEventSubscriber) Engine() *oracle_runtime.OracleEngine {
 	return l.engine
+}
+
+// Ready returns a channel that closes once the subscriber has settled on
+// either a live subscription or polling.
+func (l *L2ContractEventSubscriber) Ready() <-chan struct{} {
+	return l.readyCh
+}
+
+func (l *L2ContractEventSubscriber) markReady() {
+	l.readyOnce.Do(func() {
+		close(l.readyCh)
+	})
 }
 
 // Start begins the background subscription loop. It is safe to call Start
@@ -142,6 +157,7 @@ func (l *L2ContractEventSubscriber) run(ctx context.Context) {
 		backoff = time.Second
 
 		log.Printf("l2 subscriber: subscribed (contract=%s)", l.contractAddr.Hex())
+		l.markReady()
 
 		for {
 			select {
@@ -195,6 +211,7 @@ func (l *L2ContractEventSubscriber) syncState(ctx context.Context) error {
 
 func (l *L2ContractEventSubscriber) pollLogs(ctx context.Context) {
 	log.Printf("l2 subscriber: polling enabled (contract=%s interval=%s)", l.contractAddr.Hex(), l2PollInterval)
+	l.markReady()
 	ticker := time.NewTicker(l2PollInterval)
 	defer ticker.Stop()
 

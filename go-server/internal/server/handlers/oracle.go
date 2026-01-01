@@ -178,7 +178,12 @@ func (h *OracleHandler) GetDefaultUserBalance(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tokenOne, tokenTwo := usr.GetBalance()
+	tokenOne, tokenTwo, err := usr.GetBalance()
+	if err != nil {
+		log.Printf("get balance default-user failed: %v", err)
+		http.Error(w, "failed to get balance", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(balanceResponse{

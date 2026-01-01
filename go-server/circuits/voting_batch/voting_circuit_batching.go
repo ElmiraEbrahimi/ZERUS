@@ -14,7 +14,7 @@ import (
 const (
 	NumValidators   = 4
 	MerkleTreeDepth = 2
-	BatchSize       = 1 // could be 1, 5, 10, 15, 25, etc.
+	BatchSize       = 2 // could be 1, 5, 10, 15, 25, etc.
 
 	RewardAggregator = 500000000000000
 	RewardValidator  = 20000000000
