@@ -117,13 +117,13 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("oracle runtime init: generate eddsa key for default user: %w", err)
 	}
-	log.Println("oracle runtime: generated private key for default user")
+	log.Println("oracle runtime: successfully generated private key for default user")
 
 	userAcct, err := gnark.CreateAccount(userPK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("oracle runtime init: create account for default user: %w", err)
 	}
-	log.Println("oracle runtime: created account for default user")
+	log.Println("oracle runtime: successfully created account for default user")
 
 	usr := user.NewUser(
 		cfg,
@@ -138,6 +138,11 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 		userAcct,
 	)
 	usrPtr := &usr
+
+	// register nodes:
+	for _, n := range oracle.Nodes {
+		n.RegisterValidatorTx()
+	}
 
 	engine := &OracleEngine{
 		Users:         map[string]*user.User{usrPtr.Name: usrPtr},

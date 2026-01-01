@@ -269,7 +269,7 @@ func (n *Node) Start() {
 	n.listenToBlockchainEvents(listnerQuit)
 
 	// register validator:
-	n.registerValidatorTx()
+	n.RegisterValidatorTx()
 
 	n.wg.Add(1)
 	go func() {
@@ -995,6 +995,31 @@ func hashBatchVoteFieldwise(index, batchCommitment, vote, roundID *big.Int) []by
 
 // region contract
 
+func (n *Node) newTransactOpts() (*bind.TransactOpts, error) {
+	chainID := big.NewInt(n.cfg.ChainID)
+	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	if err != nil {
+		return nil, err
+	}
+	if n.cfg.TxGasLimit > 0 {
+		// Avoid RPC gas estimation when the endpoint doesn't support eth_estimateGas.
+		trxOpts.GasLimit = uint64(n.cfg.TxGasLimit)
+	}
+	if n.cfg.TxGasPriceWei > 0 {
+		// Avoid RPC gas price discovery when eth_gasPrice isn't available.
+		trxOpts.GasPrice = big.NewInt(n.cfg.TxGasPriceWei)
+	} else if n.cfg.TxGasFeeCapWei > 0 || n.cfg.TxGasTipCapWei > 0 {
+		// Allow explicit EIP-1559 values without RPC lookups.
+		if n.cfg.TxGasFeeCapWei > 0 {
+			trxOpts.GasFeeCap = big.NewInt(n.cfg.TxGasFeeCapWei)
+		}
+		if n.cfg.TxGasTipCapWei > 0 {
+			trxOpts.GasTipCap = big.NewInt(n.cfg.TxGasTipCapWei)
+		}
+	}
+	return trxOpts, nil
+}
+
 func (n *Node) selectNewAggregatorTx() error {
 	fmt.Printf("selecting new aggregator from contract...\n")
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
@@ -1002,8 +1027,7 @@ func (n *Node) selectNewAggregatorTx() error {
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1032,15 +1056,14 @@ func (n *Node) selectNewAggregatorTx() error {
 	return nil
 }
 
-func (n *Node) registerValidatorTx() error {
+func (n *Node) RegisterValidatorTx() error {
 	fmt.Printf("registering validator=%v ...\n", n.ID)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1079,8 +1102,7 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1117,8 +1139,7 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1181,9 +1202,7 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1255,8 +1274,7 @@ func (n *Node) ExitTx() error {
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1320,9 +1338,7 @@ func (n *Node) WithdrawAccountTx() error {
 		log.Fatalf("create contract client instance: %v", err)
 	}
 
-	chainID := big.NewInt(n.cfg.ChainID)
-
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
@@ -1390,8 +1406,7 @@ func (n *Node) getSeed() (*big.Int, *big.Int, error) {
 	if err != nil {
 		log.Fatalf("create contract client instance: %v", err)
 	}
-	chainID := big.NewInt(n.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(n.ecdsaPrivateKey, chainID)
+	trxOpts, err := n.newTransactOpts()
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}

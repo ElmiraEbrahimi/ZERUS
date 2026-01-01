@@ -290,29 +290,29 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 
 	switch name {
 	case "BurnSubmitted":
-		l.logBurnSubmitted(evlog)
+		l.handleBurnSubmitted(evlog)
 	case "ClaimSubmitted":
-		l.logClaimSubmitted(evlog)
+		l.handleClaimSubmitted(evlog)
 	case "Exiting":
-		l.logExiting(evlog)
+		l.handleExiting(evlog)
 	case "NewAggregator":
-		l.logNewAggregator(evlog)
+		l.handleNewAggregator(evlog)
 	case "Registered":
-		l.logRegistered(evlog)
+		l.handleRegistered(evlog)
 	case "Replaced":
-		l.logReplaced(evlog)
+		l.handleReplaced(evlog)
 	case "UserRegistered":
-		l.logUserRegistered(evlog)
+		l.handleUserRegistered(evlog)
 	case "ValidatorRegistered":
-		l.logValidatorRegistered(evlog)
+		l.handleValidatorRegistered(evlog)
 	case "WiVoteSubmitted":
-		l.logWiVoteSubmitted(evlog)
+		l.handleWiVoteSubmitted(evlog)
 	case "Withdrawn":
-		l.logWithdrawn(evlog)
+		l.handleWithdrawn(evlog)
 	}
 }
 
-func (l *L2ContractEventSubscriber) logBurnSubmitted(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleBurnSubmitted(evlog types.Log) {
 	evt, err := l.filterer.ParseBurnSubmitted(evlog)
 	if err != nil {
 		log.Printf("l2 event BurnSubmitted: parse error: %v", err)
@@ -325,7 +325,7 @@ func (l *L2ContractEventSubscriber) logBurnSubmitted(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logValidatorRegistered(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleValidatorRegistered(evlog types.Log) {
 	evt, err := l.filterer.ParseValidatorRegistered(evlog)
 	if err != nil {
 		log.Printf("l2 event ValidatorRegistered: parse error: %v", err)
@@ -343,23 +343,25 @@ func (l *L2ContractEventSubscriber) logValidatorRegistered(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logClaimSubmitted(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleClaimSubmitted(evlog types.Log) {
 	evt, err := l.filterer.ParseClaimSubmitted(evlog)
 	if err != nil {
 		log.Printf("l2 event ClaimSubmitted: parse error: %v", err)
 		return
 	}
 	log.Printf(
-		"l2 event ClaimSubmitted: uniqueID=%s nullifierHash=%s proofLen=%d publicWitnessLen=%d %s",
+		"l2 event ClaimSubmitted: uniqueID=%s nullifierHash=%s proof=0x%x publicWitness=0x%x proofLen=%d publicWitnessLen=%d %s",
 		evt.UniqueID,
 		common.BytesToHash(evt.NullifierHash[:]).Hex(),
+		evt.Proof,
+		evt.PublicWitness,
 		len(evt.Proof),
 		len(evt.PublicWitness),
 		eventMeta(evlog),
 	)
 }
 
-func (l *L2ContractEventSubscriber) logExiting(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleExiting(evlog types.Log) {
 	evt, err := l.filterer.ParseExiting(evlog)
 	if err != nil {
 		log.Printf("l2 event Exiting: parse error: %v", err)
@@ -372,7 +374,7 @@ func (l *L2ContractEventSubscriber) logExiting(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logNewAggregator(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleNewAggregator(evlog types.Log) {
 	evt, err := l.filterer.ParseNewAggregator(evlog)
 	if err != nil {
 		log.Printf("l2 event NewAggregator: parse error: %v", err)
@@ -385,7 +387,7 @@ func (l *L2ContractEventSubscriber) logNewAggregator(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logRegistered(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleRegistered(evlog types.Log) {
 	evt, err := l.filterer.ParseRegistered(evlog)
 	if err != nil {
 		log.Printf("l2 event Registered: parse error: %v", err)
@@ -402,7 +404,7 @@ func (l *L2ContractEventSubscriber) logRegistered(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logReplaced(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleReplaced(evlog types.Log) {
 	evt, err := l.filterer.ParseReplaced(evlog)
 	if err != nil {
 		log.Printf("l2 event Replaced: parse error: %v", err)
@@ -416,7 +418,7 @@ func (l *L2ContractEventSubscriber) logReplaced(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logUserRegistered(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleUserRegistered(evlog types.Log) {
 	evt, err := l.filterer.ParseUserRegistered(evlog)
 	if err != nil {
 		log.Printf("l2 event UserRegistered: parse error: %v", err)
@@ -433,22 +435,24 @@ func (l *L2ContractEventSubscriber) logUserRegistered(evlog types.Log) {
 	)
 }
 
-func (l *L2ContractEventSubscriber) logWiVoteSubmitted(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleWiVoteSubmitted(evlog types.Log) {
 	evt, err := l.filterer.ParseWiVoteSubmitted(evlog)
 	if err != nil {
 		log.Printf("l2 event WiVoteSubmitted: parse error: %v", err)
 		return
 	}
 	log.Printf(
-		"l2 event WiVoteSubmitted: submitter=%s validators=%s request=%s %s",
+		"l2 event WiVoteSubmitted: submitter=%s validators=%s honestBits=%s request=%s majorityVote=%s %s",
 		evt.Submitter,
 		evt.Validators,
+		evt.HonestBits,
 		evt.Request,
+		evt.MajorityVote,
 		eventMeta(evlog),
 	)
 }
 
-func (l *L2ContractEventSubscriber) logWithdrawn(evlog types.Log) {
+func (l *L2ContractEventSubscriber) handleWithdrawn(evlog types.Log) {
 	evt, err := l.filterer.ParseWithdrawn(evlog)
 	if err != nil {
 		log.Printf("l2 event Withdrawn: parse error: %v", err)

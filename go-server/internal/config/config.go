@@ -31,7 +31,7 @@ type Config struct {
 	MerkleTreeContractAddress  string `env:"MERKLE_TREE_CONTRACT_ADDRESS,required"`
 	OracleContractAddress      string `env:"ORACLE_CONTRACT_ADDRESS,required"`
 
-	BlockchainURL string `env:"BLOCKCHAIN_URL,required"`
+	BlockchainURL string `env:"ZKSYNC_RPC_URL,required"`
 
 	OracleSeedX string   `env:"ORACLE_SEED_X,required"`
 	OracleSeedY string   `env:"ORACLE_SEED_Y,required"`
@@ -49,6 +49,10 @@ type Config struct {
 	RoundIncVoteSelection   int   `env:"ROUND_INCVOTE_SELECTION,required"`
 	RoundWiVoteSelection    int   `env:"ROUND_WIVOTE_SELECTION,required"`
 	IncTreeDepth            int   `env:"INC_TREE_DEPTH,required"`
+	TxGasLimit              int64 `env:"TX_GAS_LIMIT" default:"3000000"`
+	TxGasPriceWei           int64 `env:"TX_GAS_PRICE_WEI" default:"20000000000"`
+	TxGasFeeCapWei          int64 `env:"TX_GAS_FEE_CAP_WEI" default:"0"`
+	TxGasTipCapWei          int64 `env:"TX_GAS_TIP_CAP_WEI" default:"0"`
 
 	ExportSparsePKVK   bool `env:"EXPORT_SPARSE_PKVK" default:"false"`
 	ExportSlashingPKVK bool `env:"EXPORT_SLASHING_PKVK" default:"false"`
