@@ -12,10 +12,6 @@ import (
 )
 
 const (
-	NumValidators   = 4
-	MerkleTreeDepth = 2
-	BatchSize       = 1 // could be 1, 5, 10, 15, 25, etc.
-
 	RewardAggregator = 500000000000000
 	RewardValidator  = 20000000000
 
@@ -27,12 +23,12 @@ type BatchingVotingCircuit struct {
 	//*** RoundID, BatchCommitment, WithdrawalReqIDs are newly added ***
 	RoundID          frontend.Variable   `gnark:",public"` // Public round index
 	BatchCommitment  frontend.Variable   `gnark:",public"` // Commitment hash of private WithdrawalReqIDs
-	MajorityVote     frontend.Variable   `gnark:",public"` // Decimal value of a BatchSize-bit vote bitmask
+	MajorityVote     frontend.Variable   `gnark:",public"` // Decimal value of a batch-sized vote bitmask
 	ValidatorBits    frontend.Variable   `gnark:",public"`
 	HonestBits       frontend.Variable   `gnark:",public"`
 	WithdrawalReqIDs []frontend.Variable // Slice
 	Aggregator       BatchingAggregatorConstraints
-	Validators       [NumValidators]BatchingValidatorConstraints
+	Validators       []BatchingValidatorConstraints
 }
 
 type BatchingAggregatorConstraints struct {
@@ -100,7 +96,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 
 	// *** Recompute withdrawal request hash commitment ***
 	hFunc.Reset()
-	for i := 0; i < BatchSize; i++ {
+	for i := 0; i < len(c.WithdrawalReqIDs); i++ {
 		api.Println("[batching_circuit_ids] WithdrawalReqIDs[", i, "]:", c.WithdrawalReqIDs[i])
 		hFunc.Write(c.WithdrawalReqIDs[i])
 	}
@@ -253,7 +249,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	}
 
 	// Compute real majority: isOneMajority = 1 if count1 > count0, else 0
-	threshold := frontend.Variable(NumValidators / 2)
+	threshold := frontend.Variable(len(c.Validators) / 2)
 
 	// cmp = 1 if majorityCount > threshold
 	cmp := api.Cmp(majorityCount, threshold)

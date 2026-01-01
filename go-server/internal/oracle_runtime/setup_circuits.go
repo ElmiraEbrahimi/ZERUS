@@ -42,16 +42,14 @@ func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleP
 func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.BatchingVotingCircuit, constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey) {
 	log.Println("setting up voting circuit...")
 	var circuit votingbatch.BatchingVotingCircuit
+	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, cfg.NodeCount)
 	for i := 0; i < cfg.NodeCount; i++ {
 		circuit.Validators[i] = votingbatch.BatchingValidatorConstraints{}
-		path := make([]frontend.Variable, cfg.SparseTreeDepth+1)
-		copy(circuit.Validators[i].MerkleProof.Path[:], path)
+		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, cfg.SparseTreeDepth+1)
 	}
-	aggregatorPath := make([]frontend.Variable, cfg.SparseTreeDepth+1)
-	copy(circuit.Aggregator.MerkleProof.Path[:], aggregatorPath)
+	circuit.Aggregator.MerkleProof.Path = make([]frontend.Variable, cfg.SparseTreeDepth+1)
 
-	withdrawalReqIDs := make([]frontend.Variable, cfg.BatchSize)
-	copy(circuit.WithdrawalReqIDs[:], withdrawalReqIDs)
+	circuit.WithdrawalReqIDs = make([]frontend.Variable, cfg.BatchSize)
 
 	paths := zkkeys.PathsFor(keyDir, zkkeys.CircuitVotingBatch)
 	pkPath := paths.PK

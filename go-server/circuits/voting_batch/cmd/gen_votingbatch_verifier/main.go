@@ -36,10 +36,20 @@ func main() {
 		log.Fatalf("invalid BATCH_SIZE %q", batchStr)
 	}
 
+	nodeCountStr := os.Getenv("NODE_COUNT")
+	if nodeCountStr == "" {
+		log.Fatal("NODE_COUNT is required to size validator list")
+	}
+	nodeCount, err := strconv.Atoi(nodeCountStr)
+	if err != nil || nodeCount < 1 {
+		log.Fatalf("invalid NODE_COUNT %q", nodeCountStr)
+	}
+
 	var circuit votingbatch.BatchingVotingCircuit
+	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, nodeCount)
 	circuit.WithdrawalReqIDs = make([]frontend.Variable, batchSize)
 	circuit.Aggregator.MerkleProof.Path = make([]frontend.Variable, depth+1)
-	for i := 0; i < len(circuit.Validators); i++ {
+	for i := range circuit.Validators {
 		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, depth+1)
 	}
 

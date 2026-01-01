@@ -192,7 +192,7 @@ func (n *Node) Start() {
 					// reset wivotes:
 					n.aggregatorResetWiVotes()
 
-					if n.batchedWiVoteCount() >= votingbatch.BatchSize {
+					if n.batchedWiVoteCount() >= n.cfg.BatchSize {
 						n.Oracle.PublishBatchedWiVoteRes()
 					}
 				}
@@ -200,8 +200,8 @@ func (n *Node) Start() {
 				if e.Title == MessageTittleBatchedWiVote && n.IsAggregator() {
 					fmt.Printf("aggregator (node=%d) is performing batch wiVote... (len of batched votes=%d)\n", n.ID, len(n.BatchedWiVote.WithdrawalReqIDs))
 
-					if n.batchedWiVoteCount() < votingbatch.BatchSize {
-						fmt.Printf("aggregator (node=%d) skipping batch wiVote: need %d requests, have %d\n", n.ID, votingbatch.BatchSize, len(n.BatchedWiVote.WithdrawalReqIDs))
+					if n.batchedWiVoteCount() < n.cfg.BatchSize {
+						fmt.Printf("aggregator (node=%d) skipping batch wiVote: need %d requests, have %d\n", n.ID, n.cfg.BatchSize, len(n.BatchedWiVote.WithdrawalReqIDs))
 						continue
 					}
 					n.processPendingBatchedWiVotes()
@@ -210,8 +210,8 @@ func (n *Node) Start() {
 				if e.Title == MessageTittleSelectIncVote && n.IsAggregator() {
 					fmt.Printf("aggregator (node %d) is performing incVote selection...\n", n.ID)
 					fmt.Printf("incvotes: %v\n", n.IncVotes)
-					if len(n.IncVotes) < votingbatch.BatchSize {
-						fmt.Printf("aggregator (node=%d) skipping incVote batch: need %d requests, have %d\n", n.ID, votingbatch.BatchSize, len(n.IncVotes))
+					if len(n.IncVotes) < n.cfg.BatchSize {
+						fmt.Printf("aggregator (node=%d) skipping incVote batch: need %d requests, have %d\n", n.ID, n.cfg.BatchSize, len(n.IncVotes))
 						continue
 					}
 
@@ -221,14 +221,14 @@ func (n *Node) Start() {
 						n.IPFSContent = n.FetchIPFS()
 					}
 
-					for len(n.IncVotes) >= votingbatch.BatchSize {
-						selected, keys, err := n.selectIncVoteBatch(votingbatch.BatchSize)
+					for len(n.IncVotes) >= n.cfg.BatchSize {
+						selected, keys, err := n.selectIncVoteBatch(n.cfg.BatchSize)
 						if err != nil {
 							fmt.Printf("failed to select incVote batch: %v\n", err)
 							break
 						}
-						if len(selected) != votingbatch.BatchSize {
-							fmt.Printf("aggregator (node=%d) waiting for full incVote batch: need %d requests, have %d ready\n", n.ID, votingbatch.BatchSize, len(selected))
+						if len(selected) != n.cfg.BatchSize {
+							fmt.Printf("aggregator (node=%d) waiting for full incVote batch: need %d requests, have %d ready\n", n.ID, n.cfg.BatchSize, len(selected))
 							break
 						}
 						for _, incVote := range selected {
@@ -401,9 +401,9 @@ func (n *Node) processPendingBatchedWiVotes() {
 	if n == nil || n.BatchedWiVote == nil {
 		return
 	}
-	for n.batchedWiVoteCount() >= votingbatch.BatchSize {
-		batchIDs := n.peekBatchedWiVoteIDs(votingbatch.BatchSize)
-		if len(batchIDs) != votingbatch.BatchSize {
+	for n.batchedWiVoteCount() >= n.cfg.BatchSize {
+		batchIDs := n.peekBatchedWiVoteIDs(n.cfg.BatchSize)
+		if len(batchIDs) != n.cfg.BatchSize {
 			return
 		}
 		majorityVote, err := n.processBatchedWiVotes(batchIDs)
@@ -412,7 +412,7 @@ func (n *Node) processPendingBatchedWiVotes() {
 			return
 		}
 		fmt.Printf("majority vote result %s\n", majorityVote.String())
-		n.consumeBatchedWiVotes(votingbatch.BatchSize)
+		n.consumeBatchedWiVotes(n.cfg.BatchSize)
 	}
 }
 
@@ -560,8 +560,8 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	preStateHData := make([]byte, len(n.state.HData))
 	copy(preStateHData, n.state.HData)
 
-	if len(withdrawalReqIDs) != votingbatch.BatchSize {
-		return nil, fmt.Errorf("batch size mismatch: expected %d got %d", votingbatch.BatchSize, len(withdrawalReqIDs))
+	if len(withdrawalReqIDs) != n.cfg.BatchSize {
+		return nil, fmt.Errorf("batch size mismatch: expected %d got %d", n.cfg.BatchSize, len(withdrawalReqIDs))
 	}
 
 	batchIDs := append([]*big.Int(nil), withdrawalReqIDs...)
@@ -575,11 +575,11 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	}
 
 	buildVoteMask := func(vote *BatchedWiVote) (*big.Int, error) {
-		if len(vote.WithdrawalReqIDs) < votingbatch.BatchSize || len(vote.Vote) < votingbatch.BatchSize {
-			return nil, fmt.Errorf("validator %d batch vote missing: need %d requests", vote.Index.Uint64(), votingbatch.BatchSize)
+		if len(vote.WithdrawalReqIDs) < n.cfg.BatchSize || len(vote.Vote) < n.cfg.BatchSize {
+			return nil, fmt.Errorf("validator %d batch vote missing: need %d requests", vote.Index.Uint64(), n.cfg.BatchSize)
 		}
 		mask := big.NewInt(0)
-		for j := 0; j < votingbatch.BatchSize; j++ {
+		for j := 0; j < n.cfg.BatchSize; j++ {
 			reqID := vote.WithdrawalReqIDs[j]
 			pos, ok := positions[reqID.String()]
 			if !ok {
@@ -616,8 +616,8 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 			majorityCount = count
 		}
 	}
-	if majorityCount <= votingbatch.NumValidators/2 {
-		return nil, fmt.Errorf("no vote mask majority: max=%d threshold=%d", majorityCount, votingbatch.NumValidators/2)
+	if majorityCount <= n.cfg.NodeCount/2 {
+		return nil, fmt.Errorf("no vote mask majority: max=%d threshold=%d", majorityCount, n.cfg.NodeCount/2)
 	}
 
 	hfunc := hash.MIMC_BN254.New()
@@ -696,7 +696,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("write account: %w", err)
 	}
 
-	var validatorConstraints [votingbatch.NumValidators]votingbatch.BatchingValidatorConstraints
+	validatorConstraints := make([]votingbatch.BatchingValidatorConstraints, n.cfg.NodeCount)
 
 	validatorBits := new(big.Int)
 	honestBits := new(big.Int) //tracks validators matching majority

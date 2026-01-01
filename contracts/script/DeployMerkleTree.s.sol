@@ -7,7 +7,7 @@ import "../src/merkle_tree.sol";
 contract DeployMerkleTree is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("ZKSYNC_PRIVATE_KEY");
-        uint256 levels = vm.envUint("ORACLE_LEVELS"); // reuse same env var
+        uint256 levels = vm.envUint("SPARSE_TREE_DEPTH");
 
         vm.startBroadcast(deployerPrivateKey);
 

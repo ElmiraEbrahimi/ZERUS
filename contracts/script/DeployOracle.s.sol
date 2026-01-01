@@ -8,7 +8,7 @@ contract DeployOracle is Script {
     function run() external returns (address oracleAddr) {
         uint256 deployerPrivateKey = vm.envUint("ZKSYNC_PRIVATE_KEY");
 
-        uint256 levels = vm.envUint("ORACLE_LEVELS");
+        uint256 levels = vm.envUint("SPARSE_TREE_DEPTH");
         uint256 seedX = vm.envUint("ORACLE_SEED_X");
         uint256 seedY = vm.envUint("ORACLE_SEED_Y");
 

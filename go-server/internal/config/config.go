@@ -39,7 +39,6 @@ type Config struct {
 	NodePK      string `env:"NODE_PK,required"`
 
 	ChainID                 int64 `env:"ZKSYNC_CHAIN_ID,required"`
-	OracleLevels            int   `env:"ORACLE_LEVELS,required"`
 	RoundDurationMS         int   `env:"ROUND_DURATION_MILI_SECONDS,required"`
 	NodeCount               int   `env:"NODE_COUNT,required"`
 	SparseTreeDepth         int   `env:"SPARSE_TREE_DEPTH,required"`
@@ -53,10 +52,6 @@ type Config struct {
 	TxGasPriceWei           int64 `env:"TX_GAS_PRICE_WEI" default:"20000000000"`
 	TxGasFeeCapWei          int64 `env:"TX_GAS_FEE_CAP_WEI" default:"0"`
 	TxGasTipCapWei          int64 `env:"TX_GAS_TIP_CAP_WEI" default:"0"`
-
-	ExportSparsePKVK   bool `env:"EXPORT_SPARSE_PKVK" default:"false"`
-	ExportSlashingPKVK bool `env:"EXPORT_SLASHING_PKVK" default:"false"`
-	ExportIncPKVK      bool `env:"EXPORT_INC_PKVK" default:"false"`
 
 	HTTPBindAddr    string `env:"HTTP_BIND_ADDR" default:":8080"`
 	IPFSSimDataPath string `env:"IPFS_SIM_DATA_PATH" default:".ipfs_sim_data.gob"`
@@ -197,9 +192,6 @@ func setValue(field reflect.Value, key, raw string) error {
 func validateConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")
-	}
-	if cfg.OracleLevels != cfg.SparseTreeDepth {
-		return fmt.Errorf("ORACLE_LEVELS=%d must match SPARSE_TREE_DEPTH=%d", cfg.OracleLevels, cfg.SparseTreeDepth)
 	}
 	if cfg.NodeCount < 1 {
 		return fmt.Errorf("NODE_COUNT must be >= 1")
