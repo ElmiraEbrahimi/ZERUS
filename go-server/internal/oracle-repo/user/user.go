@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"encoding/gob"
+	"errors"
 	"fmt"
-	merkleproof "l2alchemy/circuits/merkle_proof"
+	"io"
+	"l2alchemy/circuits/merkle_proof"
 	"l2alchemy/internal/config"
 	bc "l2alchemy/internal/eth"
 	"l2alchemy/internal/oracle-repo"
@@ -16,6 +19,8 @@ import (
 	"l2alchemy/internal/oracle-repo/util"
 	"log"
 	"math/big"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 
@@ -57,6 +62,14 @@ type User struct {
 	Account *gnark.Account
 }
 
+type persistedUserState struct {
+	CommitmentHashBytes []byte
+	NullifierBytes      []byte
+	NullifierHashBytes  []byte
+	SecretBytes         []byte
+	DestinationIDBytes  []byte
+}
+
 type CircuitMemTime struct {
 	IncProvingTime        int
 	IncProvingMemoryUsage int
@@ -83,7 +96,7 @@ func NewUser(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 		panic(fmt.Errorf("failed to parse ecdsaPrivateKey: %v", err))
 	}
 
-	return User{
+	usr := User{
 		cfg:             cfg,
 		ecdsaPrivateKey: ecdsaPrivateKey,
 		ethClient:       ethClient,
@@ -95,6 +108,11 @@ func NewUser(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 		circuit:         circuit,
 		Account:         account,
 	}
+	if err := usr.loadState(); err != nil {
+		log.Printf("user=%s failed to load persisted state: %v", usr.Name, err)
+	}
+
+	return usr
 }
 
 // func (u *User) ListenToBc(quit chan struct{}) {
@@ -162,6 +180,111 @@ func (u *User) GetBalance() (uint, uint) {
 	return uint(tokenOneBalance.Uint64()), uint(tokenTwoBalance.Uint64())
 }
 
+func (u *User) statePath() string {
+	if u == nil || u.cfg == nil {
+		return ""
+	}
+	return u.cfg.UserStatePath
+}
+
+func (u *User) loadState() error {
+	path := u.statePath()
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("user state path is a directory")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	dec := gob.NewDecoder(file)
+	var state persistedUserState
+	if err := dec.Decode(&state); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+
+	u.commitmentHashBytes = state.CommitmentHashBytes
+	u.nullifierBytes = state.NullifierBytes
+	u.nullifierHashBytes = state.NullifierHashBytes
+	u.secretBytes = state.SecretBytes
+	u.destinationIDBytes = state.DestinationIDBytes
+
+	return nil
+}
+
+func (u *User) saveState() error {
+	path := u.statePath()
+	if path == "" {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	enc := gob.NewEncoder(file)
+	state := persistedUserState{
+		CommitmentHashBytes: u.commitmentHashBytes,
+		NullifierBytes:      u.nullifierBytes,
+		NullifierHashBytes:  u.nullifierHashBytes,
+		SecretBytes:         u.secretBytes,
+		DestinationIDBytes:  u.destinationIDBytes,
+	}
+	if err := enc.Encode(state); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (u *User) newTransactOpts() (*bind.TransactOpts, error) {
+	chainID := big.NewInt(u.cfg.ChainID)
+	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
+	if err != nil {
+		return nil, err
+	}
+	if u.cfg.TxGasLimit > 0 {
+		// Avoid RPC gas estimation when the endpoint doesn't support eth_estimateGas.
+		trxOpts.GasLimit = uint64(u.cfg.TxGasLimit)
+	}
+	if u.cfg.TxGasPriceWei > 0 {
+		// Avoid RPC gas price discovery when eth_gasPrice isn't available.
+		trxOpts.GasPrice = big.NewInt(u.cfg.TxGasPriceWei)
+	} else if u.cfg.TxGasFeeCapWei > 0 || u.cfg.TxGasTipCapWei > 0 {
+		// Allow explicit EIP-1559 values without RPC lookups.
+		if u.cfg.TxGasFeeCapWei > 0 {
+			trxOpts.GasFeeCap = big.NewInt(u.cfg.TxGasFeeCapWei)
+		}
+		if u.cfg.TxGasTipCapWei > 0 {
+			trxOpts.GasTipCap = big.NewInt(u.cfg.TxGasTipCapWei)
+		}
+	}
+	return trxOpts, nil
+}
+
 // RegisterUserTx registers the user on-chain and waits for the receipt.
 // It returns the transaction hash on success.
 func (u *User) RegisterUserTx() (string, error) {
@@ -172,8 +295,7 @@ func (u *User) RegisterUserTx() (string, error) {
 		return "", fmt.Errorf("create oracle contract client: %w", err)
 	}
 
-	chainID := big.NewInt(u.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
+	trxOpts, err := u.newTransactOpts()
 	if err != nil {
 		return "", fmt.Errorf("create keyed transactor: %w", err)
 	}
@@ -183,12 +305,13 @@ func (u *User) RegisterUserTx() (string, error) {
 		return "", fmt.Errorf("fetch pending nonce: %w", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		return "", fmt.Errorf("suggest gas price: %w", err)
+	if trxOpts.GasPrice == nil && trxOpts.GasFeeCap == nil {
+		gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+		if err != nil {
+			return "", fmt.Errorf("suggest gas price: %w", err)
+		}
+		trxOpts.GasPrice = gasPrice
 	}
-	trxOpts.GasPrice = gasPrice
-	trxOpts.GasLimit = 300_000
 
 	pk := gnark.PublicKeyToOraclePublicKey(u.Account.PublicKey)
 	tx, err := bcClient.RegisterUser(trxOpts, *pk)
@@ -246,8 +369,7 @@ func (u *User) BurnTx() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("create contract client instance: %w", err)
 	}
-	chainID := big.NewInt(u.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
+	trxOpts, err := u.newTransactOpts()
 	if err != nil {
 		return "", "", fmt.Errorf("create keyed transactor: %w", err)
 	}
@@ -257,12 +379,13 @@ func (u *User) BurnTx() (string, string, error) {
 		return "", "", fmt.Errorf("failed to fetch pending nonce: %w", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
-	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
-	if err != nil {
-		return "", "", fmt.Errorf("suggest gas price: %w", err)
+	if trxOpts.GasPrice == nil && trxOpts.GasFeeCap == nil {
+		gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+		if err != nil {
+			return "", "", fmt.Errorf("suggest gas price: %w", err)
+		}
+		trxOpts.GasPrice = gasPrice
 	}
-	trxOpts.GasPrice = gasPrice
-	trxOpts.GasLimit = 300_000
 
 	// calculate the commitment hash:
 	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash()
@@ -290,32 +413,43 @@ func (u *User) BurnTx() (string, string, error) {
 	u.nullifierHashBytes = nullifierHashBytes[:]
 	u.secretBytes = secretBytes[:]
 	u.destinationIDBytes = destinationIDBytes[:]
+	if err := u.saveState(); err != nil {
+		return "", "", fmt.Errorf("failed to persist user state (user=%v): %w", u.Name, err)
+	}
 
 	return tx.Hash().Hex(), common.BytesToHash(commitmentHashBytes).Hex(), nil
 }
 
-func (u *User) WithdrawTx() error {
+func (u *User) WithdrawTx() (string, error) {
+	if len(u.commitmentHashBytes) == 0 {
+		if err := u.loadState(); err != nil {
+			return "", fmt.Errorf("failed to load persisted user state (user=%v): %w", u.Name, err)
+		}
+	}
+	if len(u.commitmentHashBytes) == 0 {
+		return "", fmt.Errorf("no commitment hash available for withdrawal (user=%v)", u.Name)
+	}
 	// fetch from ipfs:
 	latestIPFSHash, err := u.getLatestIPFSHashView()
 	if err != nil {
-		return fmt.Errorf("failed to get the latest ipfs hash (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to get the latest ipfs hash (user=%v): %v", u.Name, err)
 	}
 	content, err := u.IPFSClient.Download(latestIPFSHash)
 	if err != nil {
-		return fmt.Errorf("failed to download from ipfs (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to download from ipfs (user=%v): %v", u.Name, err)
 	}
 	ipfsContent, err := oracle.DeserializeIPFSContent(content)
 	if err != nil {
-		return fmt.Errorf("failed to deserialize ipfs content (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to deserialize ipfs content (user=%v): %v", u.Name, err)
 	}
 	// search ipfs for the commitment hash:
 	incVote, ok := ipfsContent.CommitmentHashIncVote[string(u.commitmentHashBytes)]
 	if !ok {
-		return fmt.Errorf("commitment hash not found in ipfs (user=%v)", u.Name)
+		return "", fmt.Errorf("commitment hash not found in ipfs (user=%v hash=%s)", u.Name, common.BytesToHash(u.commitmentHashBytes).Hex())
 	}
 	tree := ipfsContent.IncMerkleTree
 	if reflect.DeepEqual(tree, merkle.IncrementalMerkleTree{}) {
-		return fmt.Errorf("empty inc merkle tree in ipfs (user=%v)", u.Name)
+		return "", fmt.Errorf("empty inc merkle tree in ipfs (user=%v)", u.Name)
 	}
 
 	// setup to generate:
@@ -324,7 +458,7 @@ func (u *User) WithdrawTx() error {
 	depth := ipfsContent.IncMerkleTree.Depth
 	merkleRoot, proofPath, err := tree.GetProofPath(proofIndex)
 	if err != nil {
-		return fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
 	}
 
 	var witness merkleproof.MerkleProofCircuit
@@ -346,7 +480,7 @@ func (u *User) WithdrawTx() error {
 	// generate the proof
 	fullWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField())
 	if err != nil {
-		return fmt.Errorf("failed to create witness (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to create witness (user=%v): %v", u.Name, err)
 	}
 
 	fmt.Println("Debugging Witness Before Proof Generation:")
@@ -364,66 +498,74 @@ func (u *User) WithdrawTx() error {
 
 	proof, err := groth16.Prove(u.R1CS, u.PK, fullWitness)
 	if err != nil {
-		return fmt.Errorf("failed to generate Groth16 proof (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to generate Groth16 proof (user=%v): %v", u.Name, err)
 	}
 
 	publicWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if err != nil {
-		return fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
 	}
 
-	err = groth16.Verify(proof, u.VK, publicWitness)
+	if err := groth16.Verify(proof, u.VK, publicWitness); err != nil {
+		return "", fmt.Errorf("failed to verify proof (user=%v): %v", u.Name, err)
+	}
 
 	// send trx to claim:
 	fmt.Printf("claiming (user=%v) ...\n", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
-		log.Fatalf("create contract client instance: %v", err)
+		return "", fmt.Errorf("create contract client instance: %w", err)
 	}
-	chainID := big.NewInt(u.cfg.ChainID)
-	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
+	trxOpts, err := u.newTransactOpts()
 	if err != nil {
-		log.Fatalf("failed to create keyed transactor: %v", err)
+		return "", fmt.Errorf("failed to create keyed transactor: %w", err)
 	}
 
 	pendingNonce, err := u.ethClient.PendingNonceAt(context.Background(), trxOpts.From)
 	if err != nil {
-		log.Fatalf("failed to fetch pending nonce: %v", err)
+		return "", fmt.Errorf("failed to fetch pending nonce: %w", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	if trxOpts.GasPrice == nil && trxOpts.GasFeeCap == nil {
+		gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+		if err != nil {
+			return "", fmt.Errorf("suggest gas price: %w", err)
+		}
+		trxOpts.GasPrice = gasPrice
+	}
 
 	var buf bytes.Buffer
 	_, err = proof.WriteTo(&buf)
 	if err != nil {
-		log.Fatal("Failed to serialize proof:", err)
+		return "", fmt.Errorf("failed to serialize proof: %w", err)
 	}
 	proofBytes := buf.Bytes()
 
 	publicWitnessBytes, err := publicWitness.MarshalBinary()
 	if err != nil {
-		return fmt.Errorf("failed to marshal public witness (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to marshal public witness (user=%v): %v", u.Name, err)
 	}
 
 	tx, err := bcClient.Claim(trxOpts, proofBytes, publicWitnessBytes, [32]byte(u.nullifierHashBytes))
 	if err != nil {
-		log.Fatalf("call Claim() function: %v", err)
+		return "", fmt.Errorf("call Claim() function: %w", err)
 	}
 
 	receipt, err := bind.WaitMined(context.Background(), u.ethClient, tx)
 	if err != nil {
-		log.Fatalf("failed to wait for transaction mining: %v", err)
+		return "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
 	if receipt.Status == 1 {
 		fmt.Printf("successfully sent claim trx (user=%v)\n", u.Name)
 	} else {
-		fmt.Printf("Transaction failed (user=%v\n)", u.Name)
+		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
 
 	tokenOneBalance, tokenTwoBalance := u.GetBalance()
 	fmt.Printf("balance of user=%v: tokenOne=%v,tokenTwo=%v\n", u.Name, tokenOneBalance, tokenTwoBalance)
 
-	return nil
+	return tx.Hash().Hex(), nil
 }
 
 func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {

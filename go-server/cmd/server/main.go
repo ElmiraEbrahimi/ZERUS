@@ -46,6 +46,9 @@ func main() {
 		log.Fatalf("failed to initialize oracle runtime: %v", err)
 	}
 	log.Printf("oracle runtime ready!")
+	if engine.Oracle != nil {
+		engine.Oracle.Start()
+	}
 
 	l2Subscriber, err := events.NewL2ContractEventSubscriber(engine)
 	if err != nil {

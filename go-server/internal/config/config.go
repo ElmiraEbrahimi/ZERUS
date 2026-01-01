@@ -22,8 +22,8 @@ import (
 // Types supported: string, bool, int, int64.
 type Config struct {
 	// Strings
-	RPCURL          string `env:"ZKSYNC_RPC_URL,required"`
-	PrivateKey      string `env:"ZKSYNC_PRIVATE_KEY,required"`
+	RPCURL     string `env:"ZKSYNC_RPC_URL,required"`
+	PrivateKey string `env:"ZKSYNC_PRIVATE_KEY,required"`
 
 	CounterContractAddress     string `env:"COUNTER_CONTRACT_ADDRESS,required"`
 	MerkleVerifierAddress      string `env:"MERKLE_VERIFIER_ADDRESS,required"`
@@ -33,10 +33,10 @@ type Config struct {
 
 	BlockchainURL string `env:"ZKSYNC_RPC_URL,required"`
 
-	OracleSeedX string   `env:"ORACLE_SEED_X,required"`
-	OracleSeedY string   `env:"ORACLE_SEED_Y,required"`
-	UserPK      string   `env:"USER_PK,required"`
-	NodePK      string   `env:"NODE_PK,required"`
+	OracleSeedX string `env:"ORACLE_SEED_X,required"`
+	OracleSeedY string `env:"ORACLE_SEED_Y,required"`
+	UserPK      string `env:"USER_PK,required"`
+	NodePK      string `env:"NODE_PK,required"`
 
 	ChainID                 int64 `env:"ZKSYNC_CHAIN_ID,required"`
 	OracleLevels            int   `env:"ORACLE_LEVELS,required"`
@@ -58,7 +58,9 @@ type Config struct {
 	ExportSlashingPKVK bool `env:"EXPORT_SLASHING_PKVK" default:"false"`
 	ExportIncPKVK      bool `env:"EXPORT_INC_PKVK" default:"false"`
 
-	HTTPBindAddr string `env:"HTTP_BIND_ADDR" default:":8080"`
+	HTTPBindAddr    string `env:"HTTP_BIND_ADDR" default:":8080"`
+	IPFSSimDataPath string `env:"IPFS_SIM_DATA_PATH" default:".ipfs_sim_data.gob"`
+	UserStatePath   string `env:"USER_STATE_PATH" default:".user_state.gob"`
 }
 
 // Load reads .env (if present) and environment variables, binds them to Config,

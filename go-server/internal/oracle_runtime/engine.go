@@ -90,7 +90,7 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 	}
 
 	// create ipfs:
-	ipfsCl, err := db.NewIPFSClient(true, cfg.IncTreeDepth)
+	ipfsCl, err := db.NewIPFSClient(true, cfg.IncTreeDepth, cfg.IPFSSimDataPath)
 	if err != nil {
 		return nil, fmt.Errorf("oracle runtime init: create ipfs client: %w", err)
 	}

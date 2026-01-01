@@ -36,6 +36,17 @@ type burnResponse struct {
 	CommitmentHash string `json:"commitment_hash"`
 }
 
+type withdrawResponse struct {
+	User   string `json:"user"`
+	TxHash string `json:"tx_hash"`
+}
+
+type balanceResponse struct {
+	User     string `json:"user"`
+	TokenOne uint   `json:"token_one"`
+	TokenTwo uint   `json:"token_two"`
+}
+
 // RegisterDefaultUser handles POST /users/default/register by calling
 // RegisterUserTx for the user named "default-user".
 func (h *OracleHandler) RegisterDefaultUser(w http.ResponseWriter, r *http.Request) {
@@ -122,5 +133,57 @@ func (h *OracleHandler) BurnDefaultUser(w http.ResponseWriter, r *http.Request) 
 		User:           usr.Name,
 		TxHash:         txHash,
 		CommitmentHash: commitmentHash,
+	})
+}
+
+// WithdrawDefaultUser handles POST /users/default/withdraw by calling WithdrawTx
+// for the user named "default-user".
+func (h *OracleHandler) WithdrawDefaultUser(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	usr := h.engine.Users["default-user"]
+	if usr == nil {
+		http.Error(w, "default-user not found", http.StatusNotFound)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	_ = ctx // reserved for future wiring when WithdrawTx accepts a context.
+
+	txHash, err := usr.WithdrawTx()
+	if err != nil {
+		log.Printf("withdraw default-user failed: %v", err)
+		http.Error(w, "failed to withdraw user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(withdrawResponse{User: usr.Name, TxHash: txHash})
+}
+
+// GetDefaultUserBalance handles GET /users/default/balance by calling GetBalance.
+func (h *OracleHandler) GetDefaultUserBalance(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	usr := h.engine.Users["default-user"]
+	if usr == nil {
+		http.Error(w, "default-user not found", http.StatusNotFound)
+		return
+	}
+
+	tokenOne, tokenTwo := usr.GetBalance()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(balanceResponse{
+		User:     usr.Name,
+		TokenOne: tokenOne,
+		TokenTwo: tokenTwo,
 	})
 }

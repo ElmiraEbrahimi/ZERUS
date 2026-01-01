@@ -75,6 +75,15 @@ func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *ha
 			oracle.RegisterDefaultUser(w, r)
 		})
 
+		// GET /users/default/balance returns the default user's balance.
+		mux.HandleFunc("/users/default/balance", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.GetDefaultUserBalance(w, r)
+		})
+
 		// POST /users/default/burn triggers a burn for the default user.
 		mux.HandleFunc("/users/default/burn", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
@@ -82,6 +91,15 @@ func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *ha
 				return
 			}
 			oracle.BurnDefaultUser(w, r)
+		})
+
+		// POST /users/default/withdraw triggers a withdraw for the default user.
+		mux.HandleFunc("/users/default/withdraw", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			oracle.WithdrawDefaultUser(w, r)
 		})
 
 		// POST /validators/register registers all validator nodes on-chain.

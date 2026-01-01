@@ -206,6 +206,7 @@ contract Oracle is MerkleTree {
         bytes memory publicWitness,
         bytes32 nullifierHash
     ) external {
+        require(users[msg.sender] == true, "address not registered");
         // uint256 uniqueID = getRandomNumber();
         uint256 uniqueID = roundID;
 
@@ -219,9 +220,10 @@ contract Oracle is MerkleTree {
             proof,
             publicWitness,
             nullifierHash,
-            false,
-            false
+            true,
+            true
         );
+        tokenClaimBalances[msg.sender] += BURN_AMOUNT;
 
         roundID++;
 

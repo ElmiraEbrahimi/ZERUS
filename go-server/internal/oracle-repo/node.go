@@ -76,7 +76,15 @@ type Node struct {
 }
 
 func NewNode(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, oracle *Oracle, id uint, privateKey *eddsa.PrivateKey, offeredAmount uint, role uint, validatorAccounts []*gnark.Account) *Node {
-	n := &Node{cfg: cfg, ethClient: ethClient, Oracle: oracle, IPFSClient: ipfsClient, ID: id, Role: Validator}
+	n := &Node{
+		cfg:        cfg,
+		ethClient:  ethClient,
+		Oracle:     oracle,
+		IPFSClient: ipfsClient,
+		ID:         id,
+		Role:       Validator,
+		wg:         &sync.WaitGroup{},
+	}
 
 	fmt.Printf("setting account for node (=%v)...\n", n.ID)
 	n.privateKey = privateKey
@@ -136,8 +144,9 @@ func (n *Node) IsAggregator() bool {
 }
 
 func (n *Node) Start() {
-	// register validator:
-	n.RegisterValidatorTx()
+	if n.wg == nil {
+		n.wg = &sync.WaitGroup{}
+	}
 
 	n.wg.Add(1)
 	go func() {
@@ -187,9 +196,14 @@ func (n *Node) Start() {
 				if e.Title == MessageTittleBatchedWiVote && n.IsAggregator() {
 					fmt.Printf("aggregator (node=%d) is performing batch wiVote... (len of batched votes=%d)\n", n.ID, len(n.BatchedWiVote.WithdrawalReqIDs))
 
+					if len(n.BatchedWiVote.WithdrawalReqIDs) < votingbatch.BatchSize {
+						fmt.Printf("aggregator (node=%d) skipping batch wiVote: need %d requests, have %d\n", n.ID, votingbatch.BatchSize, len(n.BatchedWiVote.WithdrawalReqIDs))
+						continue
+					}
 					majorityVote, err := n.processBatchedWiVotes()
 					if err != nil {
-						panic(fmt.Errorf("failed to process batched wiVotes: %v", err))
+						fmt.Printf("aggregator (node=%d) failed to process batched wiVotes: %v\n", n.ID, err)
+						continue
 					}
 					fmt.Printf("majority vote result ", majorityVote.String())
 
@@ -454,7 +468,7 @@ func (n *Node) processBatchedWiVotes() (*big.Int, error) {
 	hfunc.Reset()
 	fmt.Printf("Length of WithdrawalReqIDs: %d\n", len(n.BatchedWiVote.WithdrawalReqIDs))
 	if len(n.BatchedWiVote.WithdrawalReqIDs) != votingbatch.BatchSize {
-		fmt.Println("Batch size is not equal to the number of votes")
+		return nil, fmt.Errorf("batch size mismatch: expected %d got %d", votingbatch.BatchSize, len(n.BatchedWiVote.WithdrawalReqIDs))
 	}
 
 	fmt.Println("Sorted WithdrawalReqIDs:")

@@ -7,6 +7,7 @@ import (
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
+	"log"
 	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
@@ -103,6 +104,9 @@ func NewOracle(
 	}
 	o.Nodes = nodes
 	o.AggregatorID = 0
+	if agg, ok := o.Nodes[o.AggregatorID]; ok && agg != nil {
+		agg.Role = Aggregator
+	}
 
 	return o
 }
@@ -123,8 +127,18 @@ func (o *Oracle) SelectNewAggregator() error {
 // region internal messages
 
 func (o *Oracle) PublishInternalMessage(msg InternalOraclelMessage) {
-	for _, node := range o.Nodes {
-		node.OracleMessages <- msg
+	if o == nil {
+		return
+	}
+	for id, node := range o.Nodes {
+		if node == nil || node.OracleMessages == nil {
+			continue
+		}
+		select {
+		case node.OracleMessages <- msg:
+		default:
+			log.Printf("oracle: drop internal message title=%s node=%d (channel full)", msg.Title, id)
+		}
 	}
 }
 
@@ -144,24 +158,32 @@ func (o *Oracle) PublishWiVote(wiVote *WiVote) {
 }
 
 func (o *Oracle) PublishIncVoteSelectionRes() {
+	o.messageLock.Lock()
+	defer o.messageLock.Unlock()
 	o.PublishInternalMessage(
 		InternalOraclelMessage{From: OracleID, Title: MessageTittleSelectIncVote, Message: ""},
 	)
 }
 
 func (o *Oracle) PublishWiVoteSelectionRes() {
+	o.messageLock.Lock()
+	defer o.messageLock.Unlock()
 	o.PublishInternalMessage(
 		InternalOraclelMessage{From: OracleID, Title: MessageTittleSelectWiVote, Message: ""},
 	)
 }
 
 func (o *Oracle) PublishBatchedWiVoteRes() {
+	o.messageLock.Lock()
+	defer o.messageLock.Unlock()
 	o.PublishInternalMessage(
 		InternalOraclelMessage{From: OracleID, Title: MessageTittleBatchedWiVote, Message: ""},
 	)
 }
 
 func (o *Oracle) PublishTerminate() {
+	o.messageLock.Lock()
+	defer o.messageLock.Unlock()
 	o.PublishInternalMessage(
 		InternalOraclelMessage{From: OracleID, Title: MessageTitleTerminate, Message: ""},
 	)

@@ -574,6 +574,7 @@ func (l *L2ContractEventSubscriber) applyBurnSubmittedEvent(evt *eth.OracleBurnS
 		log.Printf("node %d publishing incVote for burn event (incTreeIndex=%v)...", node.ID, incVote.IncTreeIndex)
 		node.Oracle.PublishIncVote(incVote)
 	}
+	l.engine.Oracle.PublishIncVoteSelectionRes()
 	return nil
 }
 
@@ -592,6 +593,7 @@ func (l *L2ContractEventSubscriber) applyClaimSubmittedEvent(evt *eth.OracleClai
 		}
 		node.Oracle.PublishWiVote(wiVote)
 	}
+	l.engine.Oracle.PublishWiVoteSelectionRes()
 	return nil
 }
 
