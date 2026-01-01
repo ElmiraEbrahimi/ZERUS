@@ -239,24 +239,30 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 	return latestIPFSHash, nil
 }
 
-func (u *User) BurnTx() error {
+func (u *User) BurnTx() (string, string, error) {
 	fmt.Printf("user=%v is burning...\n", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
-		log.Fatalf("create contract client instance: %v", err)
+		return "", "", fmt.Errorf("create contract client instance: %w", err)
 	}
 	chainID := big.NewInt(u.cfg.ChainID)
 	trxOpts, err := bind.NewKeyedTransactorWithChainID(u.ecdsaPrivateKey, chainID)
 	if err != nil {
-		log.Fatalf("failed to create keyed transactor: %v", err)
+		return "", "", fmt.Errorf("create keyed transactor: %w", err)
 	}
 
 	pendingNonce, err := u.ethClient.PendingNonceAt(context.Background(), trxOpts.From)
 	if err != nil {
-		log.Fatalf("failed to fetch pending nonce: %v", err)
+		return "", "", fmt.Errorf("failed to fetch pending nonce: %w", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	gasPrice, err := u.ethClient.SuggestGasPrice(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("suggest gas price: %w", err)
+	}
+	trxOpts.GasPrice = gasPrice
+	trxOpts.GasLimit = 300_000
 
 	// calculate the commitment hash:
 	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash()
@@ -266,18 +272,17 @@ func (u *User) BurnTx() error {
 	copy(commitmentHash[:], commitmentHashBytes)
 	tx, err := bcClient.Burn(trxOpts, commitmentHash)
 	if err != nil {
-		log.Fatalf("call Burn() function: %v", err)
+		return "", "", fmt.Errorf("call Burn() function: %w", err)
 	}
 
 	receipt, err := bind.WaitMined(context.Background(), u.ethClient, tx)
 	if err != nil {
-		log.Fatalf("failed to wait for transaction mining: %v", err)
+		return "", "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
-	if receipt.Status == 1 {
-		fmt.Printf("successfully burned from user=%v\n", u.Name)
-	} else {
-		fmt.Printf("Transaction failed (user=%v\n)", u.Name)
+	if receipt.Status != 1 {
+		return "", "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
+	fmt.Printf("successfully burned from user=%v\n", u.Name)
 
 	// save the calculated values:
 	u.commitmentHashBytes = commitmentHashBytes[:]
@@ -286,7 +291,7 @@ func (u *User) BurnTx() error {
 	u.secretBytes = secretBytes[:]
 	u.destinationIDBytes = destinationIDBytes[:]
 
-	return nil
+	return tx.Hash().Hex(), common.BytesToHash(commitmentHashBytes).Hex(), nil
 }
 
 func (u *User) WithdrawTx() error {

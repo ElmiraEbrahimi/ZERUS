@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"l2alchemy/internal/eth"
+	"l2alchemy/internal/oracle-repo"
 	"l2alchemy/internal/oracle_runtime"
 
 	"github.com/ethereum/go-ethereum"
@@ -343,6 +344,9 @@ func (l *L2ContractEventSubscriber) handleBurnSubmitted(evlog types.Log) {
 		common.BytesToHash(evt.CommitmentHash[:]).Hex(),
 		eventMeta(evlog),
 	)
+	if err := l.applyBurnSubmittedEvent(evt); err != nil {
+		log.Printf("l2 event BurnSubmitted: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleValidatorRegistered(evlog types.Log) {
@@ -361,6 +365,9 @@ func (l *L2ContractEventSubscriber) handleValidatorRegistered(evlog types.Log) {
 		evt.Balance,
 		eventMeta(evlog),
 	)
+	if err := l.applyValidatorRegisteredEvent(evt); err != nil {
+		log.Printf("l2 event ValidatorRegistered: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleClaimSubmitted(evlog types.Log) {
@@ -379,6 +386,9 @@ func (l *L2ContractEventSubscriber) handleClaimSubmitted(evlog types.Log) {
 		len(evt.PublicWitness),
 		eventMeta(evlog),
 	)
+	if err := l.applyClaimSubmittedEvent(evt); err != nil {
+		log.Printf("l2 event ClaimSubmitted: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleExiting(evlog types.Log) {
@@ -405,6 +415,9 @@ func (l *L2ContractEventSubscriber) handleNewAggregator(evlog types.Log) {
 		evt.ValidatorID,
 		eventMeta(evlog),
 	)
+	if err := l.applyNewAggregatorEvent(evt); err != nil {
+		log.Printf("l2 event NewAggregator: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleRegistered(evlog types.Log) {
@@ -490,6 +503,110 @@ func (l *L2ContractEventSubscriber) applyWiVoteSubmittedEvent(evt *eth.OracleWiV
 		return fmt.Errorf("oracle engine not initialized")
 	}
 	return l.engine.Oracle.ApplyWiVoteSubmittedEvent(evt)
+}
+
+func (l *L2ContractEventSubscriber) applyNewAggregatorEvent(evt *eth.OracleNewAggregator) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	newAggID := uint(evt.ValidatorID.Uint64())
+	var found bool
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil {
+			continue
+		}
+		if node.ID == newAggID {
+			log.Printf("node %d says: I am the new aggregator", node.ID)
+			node.IncVotes = make(map[string]map[uint]*oracle.IncVote)
+			node.WiVotes = make(map[string]map[uint]*oracle.WiVote)
+			l.resetBatchedWiVotes()
+			node.Role = oracle.Aggregator
+			found = true
+		} else {
+			node.Role = oracle.Validator
+		}
+	}
+	if found {
+		l.engine.Oracle.AggregatorID = newAggID
+	}
+	return nil
+}
+
+func (l *L2ContractEventSubscriber) applyValidatorRegisteredEvent(evt *eth.OracleValidatorRegistered) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil || node.Account == nil {
+			continue
+		}
+		if evt.ValidatorID.Uint64() != uint64(node.ID) {
+			continue
+		}
+		node.Account.Index = evt.Index
+		node.Account.Balance = evt.Balance
+		log.Printf("node=%v registered: %v", node.ID, node.Account)
+	}
+	return nil
+}
+
+func (l *L2ContractEventSubscriber) applyBurnSubmittedEvent(evt *eth.OracleBurnSubmitted) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil || node.IncMerkleTree == nil {
+			continue
+		}
+		log.Printf("node %d received burn event", node.ID)
+		eventCommitmentHash := evt.CommitmentHash[:]
+		incTreeIndex, _, rootHash, err := node.IncMerkleTree.AddLeafValidator(eventCommitmentHash)
+		if err != nil {
+			log.Printf("node %d failed to add leaf to merkle tree: %v", node.ID, err)
+			continue
+		}
+		incVote := &oracle.IncVote{
+			CommitmentHash: eventCommitmentHash,
+			NodeID:         node.ID,
+			IncTreeIndex:   incTreeIndex,
+			RootHash:       rootHash,
+		}
+		log.Printf("node %d publishing incVote for burn event (incTreeIndex=%v)...", node.ID, incVote.IncTreeIndex)
+		node.Oracle.PublishIncVote(incVote)
+	}
+	return nil
+}
+
+func (l *L2ContractEventSubscriber) applyClaimSubmittedEvent(evt *eth.OracleClaimSubmitted) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil {
+			continue
+		}
+		log.Printf("node %d received claim event", node.ID)
+		wiVote, err := node.VerifyClaim(evt)
+		if err != nil {
+			log.Fatalf("failed verifying claim: %v", err)
+		}
+		node.Oracle.PublishWiVote(wiVote)
+	}
+	return nil
+}
+
+func (l *L2ContractEventSubscriber) resetBatchedWiVotes() {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return
+	}
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil || node.BatchedWiVote == nil {
+			continue
+		}
+		node.BatchedWiVote.WithdrawalReqIDs = make([]*big.Int, 0)
+		node.BatchedWiVote.Vote = make([]*big.Int, 0)
+		node.BatchedWiVote.MajorityOfVotes = make([]*big.Int, 0)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleWithdrawn(evlog types.Log) {

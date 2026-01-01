@@ -30,6 +30,12 @@ type registerValidatorsResponse struct {
 	Count   int    `json:"count"`
 }
 
+type burnResponse struct {
+	User           string `json:"user"`
+	TxHash         string `json:"tx_hash"`
+	CommitmentHash string `json:"commitment_hash"`
+}
+
 // RegisterDefaultUser handles POST /users/default/register by calling
 // RegisterUserTx for the user named "default-user".
 func (h *OracleHandler) RegisterDefaultUser(w http.ResponseWriter, r *http.Request) {
@@ -84,4 +90,37 @@ func (h *OracleHandler) RegisterValidators(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(registerValidatorsResponse{NodeIDs: nodeIDs, Count: len(nodeIDs)})
+}
+
+// BurnDefaultUser handles POST /users/default/burn by calling BurnTx for the
+// user named "default-user".
+func (h *OracleHandler) BurnDefaultUser(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.engine == nil {
+		http.Error(w, "oracle engine not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	usr := h.engine.Users["default-user"]
+	if usr == nil {
+		http.Error(w, "default-user not found", http.StatusNotFound)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	_ = ctx // reserved for future wiring when BurnTx accepts a context.
+
+	txHash, commitmentHash, err := usr.BurnTx()
+	if err != nil {
+		log.Printf("burn default-user failed: %v", err)
+		http.Error(w, "failed to burn user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(burnResponse{
+		User:           usr.Name,
+		TxHash:         txHash,
+		CommitmentHash: commitmentHash,
+	})
 }

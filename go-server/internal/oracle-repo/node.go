@@ -135,126 +135,7 @@ func (n *Node) IsAggregator() bool {
 	return n.Role == Aggregator
 }
 
-func (n *Node) listenToBlockchainEvents(quit chan struct{}) {
-	contractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
-
-	// filterers:
-	oracleFilterer, err := bc.NewOracleFilterer(contractAddr, n.ethClient)
-	if err != nil {
-		log.Fatalf("create oracle filterer: %v", err)
-	}
-	newAggEventChan := make(chan *bc.OracleNewAggregator)
-	accountRegEventChan := make(chan *bc.OracleValidatorRegistered)
-	burnEventChan := make(chan *bc.OracleBurnSubmitted)
-	claimEventChan := make(chan *bc.OracleClaimSubmitted)
-
-	// event subs:
-	ctx := context.Background()
-	newAggSub, err := oracleFilterer.WatchNewAggregator(&bind.WatchOpts{Context: ctx}, newAggEventChan)
-	if err != nil {
-		log.Fatalf("set up new aggregator event subscription: %v", err)
-	}
-	accountRegSub, err := oracleFilterer.WatchValidatorRegistered(&bind.WatchOpts{Context: ctx}, accountRegEventChan)
-	if err != nil {
-		log.Fatalf("set up account register event subscription: %v", err)
-	}
-	burnSub, err := oracleFilterer.WatchBurnSubmitted(&bind.WatchOpts{Context: ctx}, burnEventChan)
-	if err != nil {
-		log.Fatalf("set up burn event subscription: %v", err)
-	}
-	claimSub, err := oracleFilterer.WatchClaimSubmitted(&bind.WatchOpts{Context: ctx}, claimEventChan)
-	if err != nil {
-		log.Fatalf("set up claim event subscription: %v", err)
-	}
-
-	n.wg.Add(1)
-	go func() {
-		for {
-			select {
-			// new aggregator event:
-			case newAggEvent := <-newAggEventChan:
-				// fmt.Printf("node %d received new aggregator event, new aggregator ID=%v\n", n.ID, newAggEvent.Arg0)
-				newAggID := newAggEvent.ValidatorID.Uint64()
-				if uint(newAggID) == n.ID {
-					fmt.Printf("node %d says: I am the new aggregator\n", n.ID)
-					n.aggregatorResetIncVotes()
-					n.aggregatorResetWiVotes()
-					n.resetBatchedWiVotes()
-					n.Role = Aggregator
-					n.Oracle.AggregatorID = n.ID
-				} else {
-					n.Role = Validator
-				}
-
-			case accountRegEvent := <-accountRegEventChan:
-				if accountRegEvent.ValidatorID.Uint64() == uint64(n.ID) {
-					n.Account.Index = accountRegEvent.Index
-					n.Account.Balance = accountRegEvent.Balance
-
-					fmt.Printf("node=%v registered: %v\n", n.ID, n.Account)
-				}
-
-			// burn event:
-			case burnEvent := <-burnEventChan:
-				// fmt.Printf("node %d received burn event (commitmentHash=%v)...\n", n.ID, burnEvent.CommitmentHash)
-				fmt.Printf("node %d received burn event\n", n.ID)
-				eventCommitmentHash := burnEvent.CommitmentHash[:]
-				// incTreeIndex, commitmentHash, rootHash, err := n.MerkleTree.AddLeafValidator(eventCommitmentHash)
-				incTreeIndex, _, rootHash, err := n.IncMerkleTree.AddLeafValidator(eventCommitmentHash)
-				if err != nil {
-					fmt.Printf("node %d failed to add leaf to merkle tree: %v\n", n.ID, err)
-					break
-				}
-				incVote := &IncVote{
-					CommitmentHash: eventCommitmentHash,
-					NodeID:         n.ID,
-					IncTreeIndex:   incTreeIndex,
-					RootHash:       rootHash,
-				}
-				fmt.Printf("node %d publishing incVote for burn event (incTreeIndex=%v)...\n", n.ID, incVote.IncTreeIndex)
-				n.Oracle.PublishIncVote(incVote)
-
-			// claim event:
-			case claimEvent := <-claimEventChan:
-				fmt.Printf("node %d received claim event\n", n.ID)
-
-				wiVote, err := n.VerifyClaim(claimEvent)
-				if err != nil {
-					log.Fatalf("failed verifying claim: %v\n", err)
-				}
-				n.Oracle.PublishWiVote(wiVote)
-
-			// sub errors:
-			case err := <-newAggSub.Err():
-				log.Fatalf("burn sub error: %v\n", err)
-			case err := <-accountRegSub.Err():
-				log.Fatalf("account reg sub error: %v\n", err)
-			case err := <-burnSub.Err():
-				log.Fatalf("burn sub error: %v\n", err)
-			case err := <-claimSub.Err():
-				log.Fatalf("claim sub error: %v\n", err)
-			// quit:
-			case <-quit:
-				fmt.Printf("blockchain listener of node %v quitting...\n", n.ID)
-				newAggSub.Unsubscribe()
-				accountRegSub.Unsubscribe()
-				burnSub.Unsubscribe()
-				claimSub.Unsubscribe()
-				close(newAggEventChan)
-				close(accountRegEventChan)
-				close(burnEventChan)
-				close(claimEventChan)
-				n.wg.Done()
-				return
-			}
-		}
-	}()
-}
-
 func (n *Node) Start() {
-	listnerQuit := make(chan struct{}, 1)
-	n.listenToBlockchainEvents(listnerQuit)
-
 	// register validator:
 	n.RegisterValidatorTx()
 
@@ -282,7 +163,6 @@ func (n *Node) Start() {
 					// 	}
 					// }
 					// /////////////////////////////////////////////////////
-					listnerQuit <- struct{}{}
 					n.wg.Done()
 					return
 				}
