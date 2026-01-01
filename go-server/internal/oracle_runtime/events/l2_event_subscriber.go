@@ -22,9 +22,7 @@ const l2LogsChanBuffer = 256
 const l2PollInterval = 5 * time.Second
 
 // L2ContractEventSubscriber subscribes to L2 contract logs and keeps a handle to the
-// oracle engine so events can be applied to the runtime state in the future.
-//
-// For now, it only logs received events.
+// oracle engine so events can be applied to the runtime state.
 //
 // This is intentionally L2-scoped so a future L1 subscriber can coexist
 // independently.
@@ -115,6 +113,9 @@ func (l *L2ContractEventSubscriber) Stop() {
 }
 
 func (l *L2ContractEventSubscriber) run(ctx context.Context) {
+	if err := l.syncState(ctx); err != nil {
+		log.Printf("l2 subscriber: initial sync failed: %v", err)
+	}
 	backoff := time.Second
 	for {
 		select {
@@ -175,6 +176,22 @@ func (l *L2ContractEventSubscriber) run(ctx context.Context) {
 	}
 }
 
+func (l *L2ContractEventSubscriber) syncState(ctx context.Context) error {
+	query := ethereum.FilterQuery{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(50),
+		Addresses: []common.Address{l.contractAddr},
+	}
+	logs, err := l.engine.EthClient.FilterLogs(ctx, query)
+	if err != nil {
+		return fmt.Errorf("filter logs: %w", err)
+	}
+	for _, evlog := range logs {
+		l.logEvent(evlog)
+	}
+	return nil
+}
+
 func (l *L2ContractEventSubscriber) pollLogs(ctx context.Context) {
 	log.Printf("l2 subscriber: polling enabled (contract=%s interval=%s)", l.contractAddr.Hex(), l2PollInterval)
 	ticker := time.NewTicker(l2PollInterval)
@@ -228,15 +245,18 @@ func (l *L2ContractEventSubscriber) fetchLatestBlock(ctx context.Context) (uint6
 
 func (l *L2ContractEventSubscriber) logEvent(evlog types.Log) {
 	name, indexed, nonIndexed, decodeErr := l.decodeEvent(evlog)
-	log.Printf("received l2 event: %s %s topics=%d data=%d indexed=%v args=%v%s",
-		name,
-		eventMeta(evlog),
-		len(evlog.Topics),
-		len(evlog.Data),
-		indexed,
-		nonIndexed,
-		formatDecodeErr(decodeErr),
-	)
+	if decodeErr != "" {
+		log.Printf(
+			"l2 event decode error: name=%s %s topics=%d data=%d indexed=%v args=%v err=%s",
+			name,
+			eventMeta(evlog),
+			len(evlog.Topics),
+			len(evlog.Data),
+			indexed,
+			nonIndexed,
+			decodeErr,
+		)
+	}
 	l.handleTypedEvent(name, evlog)
 }
 
@@ -402,6 +422,9 @@ func (l *L2ContractEventSubscriber) handleRegistered(evlog types.Log) {
 		evt.Value,
 		eventMeta(evlog),
 	)
+	if err := l.applyRegisteredEvent(evt); err != nil {
+		log.Printf("l2 event Registered: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleReplaced(evlog types.Log) {
@@ -450,6 +473,23 @@ func (l *L2ContractEventSubscriber) handleWiVoteSubmitted(evlog types.Log) {
 		evt.MajorityVote,
 		eventMeta(evlog),
 	)
+	if err := l.applyWiVoteSubmittedEvent(evt); err != nil {
+		log.Printf("l2 event WiVoteSubmitted: apply error: %v", err)
+	}
+}
+
+func (l *L2ContractEventSubscriber) applyRegisteredEvent(evt *eth.OracleRegistered) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	return l.engine.Oracle.ApplyRegisteredEvent(evt)
+}
+
+func (l *L2ContractEventSubscriber) applyWiVoteSubmittedEvent(evt *eth.OracleWiVoteSubmitted) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	return l.engine.Oracle.ApplyWiVoteSubmittedEvent(evt)
 }
 
 func (l *L2ContractEventSubscriber) handleWithdrawn(evlog types.Log) {
@@ -473,7 +513,7 @@ func appendDecodeErr(current, next string) string {
 }
 
 func eventMeta(evlog types.Log) string {
-	return fmt.Sprintf("block=%d tx=%s idx=%d addr=%s", evlog.BlockNumber, evlog.TxHash.Hex(), evlog.Index, evlog.Address.Hex())
+	return fmt.Sprintf("block=%d tx=%s idx=%d", evlog.BlockNumber, evlog.TxHash.Hex(), evlog.Index)
 }
 
 func formatDecodeErr(err string) string {

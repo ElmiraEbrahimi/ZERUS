@@ -54,7 +54,6 @@ type Node struct {
 	privateKey      *eddsa.PrivateKey
 	Account         *gnark.Account
 	state           *gnark.State
-	stateSync       *gnark.StateSync
 
 	Oracle         *Oracle `json:"oracle"`
 	OracleMessages chan InternalOraclelMessage
@@ -94,15 +93,6 @@ func NewNode(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPF
 		panic(err)
 	}
 	n.state = state
-
-	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
-	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
-	if err != nil {
-		log.Fatalf("create contract client instance: %v", err)
-	}
-
-	fmt.Printf("setting stateSync for node (=%v)...\n", n.ID)
-	n.stateSync = gnark.NewStateSync(cfg, uint64(id), state, ethClient, bcClient)
 
 	pk := strings.TrimPrefix(n.cfg.NodePK, "0x")
 	pk = strings.TrimPrefix(pk, "0X")
@@ -262,12 +252,6 @@ func (n *Node) listenToBlockchainEvents(quit chan struct{}) {
 }
 
 func (n *Node) Start() {
-	// listen to blockchain events:
-	go func() {
-		if err := n.stateSync.Synchronize(); err != nil {
-			panic(fmt.Errorf("failed to sync state: %v", err))
-		}
-	}()
 	listnerQuit := make(chan struct{}, 1)
 	n.listenToBlockchainEvents(listnerQuit)
 
@@ -1019,6 +1003,7 @@ func (n *Node) selectNewAggregatorTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
+	logTxReceipt("select new aggregator", tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully called SelectNewAggregatorTx (by oracle)\n")
 	} else {
@@ -1056,18 +1041,19 @@ func (n *Node) RegisterValidatorTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
+	logTxReceipt(fmt.Sprintf("register validator node=%v", n.ID), tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully registered validator node=%v\n", n.ID)
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
-	revertReason, callErr := n.revertReason(context.Background(), tx, receipt.BlockNumber)
-	if revertReason != "" {
-		return fmt.Errorf("register validator failed (node=%v tx=%s revert=%s)", n.ID, tx.Hash().Hex(), revertReason)
-	}
-	if callErr != "" {
-		return fmt.Errorf("register validator failed (node=%v tx=%s call_err=%s)", n.ID, tx.Hash().Hex(), callErr)
-	}
-	return fmt.Errorf("register validator failed (node=%v tx=%s)", n.ID, tx.Hash().Hex())
+		revertReason, callErr := n.revertReason(context.Background(), tx, receipt.BlockNumber)
+		if revertReason != "" {
+			return fmt.Errorf("register validator failed (node=%v tx=%s revert=%s)", n.ID, tx.Hash().Hex(), revertReason)
+		}
+		if callErr != "" {
+			return fmt.Errorf("register validator failed (node=%v tx=%s call_err=%s)", n.ID, tx.Hash().Hex(), callErr)
+		}
+		return fmt.Errorf("register validator failed (node=%v tx=%s)", n.ID, tx.Hash().Hex())
 	}
 
 	return nil
@@ -1116,6 +1102,30 @@ func (n *Node) revertReason(ctx context.Context, tx *types.Transaction, blockNum
 	return reason, ""
 }
 
+func logTxReceipt(label string, tx *types.Transaction, receipt *types.Receipt) {
+	if tx == nil || receipt == nil {
+		return
+	}
+	effectiveGasPrice := receipt.EffectiveGasPrice
+	if effectiveGasPrice == nil {
+		effectiveGasPrice = tx.GasPrice()
+	}
+	gasCostWei := new(big.Int)
+	if effectiveGasPrice != nil {
+		gasCostWei.Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveGasPrice)
+	} else {
+		effectiveGasPrice = big.NewInt(0)
+	}
+	log.Printf(
+		"%s tx: hash=%s gasUsed=%d gasPrice=%s gasCost=%s wei",
+		label,
+		tx.Hash().Hex(),
+		receipt.GasUsed,
+		effectiveGasPrice.String(),
+		gasCostWei.String(),
+	)
+}
+
 func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	fmt.Printf("updating latest ipfs hash (validator=%v) ...\n", n.ID)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
@@ -1142,6 +1152,7 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
+	logTxReceipt("update latest ipfs hash", tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully updated ipfs hash (node=%v)\n", n.ID)
 	} else {
@@ -1189,6 +1200,7 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
+	logTxReceipt("submit wivote", tx, receipt)
 
 	if receipt.Status == 1 {
 		fmt.Printf("successfully submitted wivote (node=%v)\n", n.ID)
@@ -1261,7 +1273,7 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	}
 
 	if receipt.Status == 1 {
-		log.Printf("replace: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		logTxReceipt(fmt.Sprintf("replace account index=%d", account.Index.Uint64()), tx, receipt)
 	} else {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1325,7 +1337,7 @@ func (n *Node) ExitTx() error {
 	}
 
 	if receipt.Status == 1 {
-		log.Printf("exit: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		logTxReceipt(fmt.Sprintf("exit account index=%d", account.Index.Uint64()), tx, receipt)
 	} else {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1386,11 +1398,10 @@ func (n *Node) WithdrawAccountTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for withdraw tx (index=%d): %v", account.Index.Uint64(), err)
 	}
-	log.Printf("✅ Account index=%d | balance=%s | Withdraw gas used: %d\n", account.Index.Uint64(), account.Balance.String(), receipt.GasUsed)
-	log.Printf("DEBUG: Withdrawal receipt status: %d\n", receipt.Status)
+	logTxReceipt(fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()), tx, receipt)
 
 	if receipt.Status == 1 {
-		log.Printf("Withdrawn: account index=%d | gas=%d | tx=%s\n", account.Index.Uint64(), receipt.GasUsed, tx.Hash().Hex())
+		log.Printf("withdrawn account index=%d", account.Index.Uint64())
 	} else {
 		log.Fatalf("withdraw tx reverted (index=%d)\n", account.Index.Uint64())
 	}
