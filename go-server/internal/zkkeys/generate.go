@@ -3,7 +3,6 @@ package zkkeys
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -33,93 +32,132 @@ func SupportedCircuits() []CircuitName {
 // GenerateKeysToFiles compiles the circuit and runs Groth16 Setup, writing pk/vk to pkPath and vkPath.
 // It returns the compiled constraint system, keys, and a coarse estimate of memory usage (MB) and elapsed time (ms).
 // If force is false and both pk/vk files exist, it skips setup and loads the keys from disk.
-func GenerateKeysToFiles(c CircuitName, pkPath, vkPath string, force bool) (constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey, int, int, error) {
+func GenerateKeysToFiles(
+	c CircuitName,
+	pkPath, vkPath string,
+	force bool,
+) (
+	constraint.ConstraintSystem,
+	groth16.ProvingKey,
+	groth16.VerifyingKey,
+	int, int,
+	int, int,
+	error,
+) {
+
+	// -------------------------------
+	// 1) Build circuit
+	// -------------------------------
 	var circuit frontend.Circuit
 	switch c {
 	case CircuitMerkleProof:
-		merkleCircuit, err := merkleCircuitFromEnv()
+		mc, err := merkleCircuitFromEnv()
 		if err != nil {
-			return nil, nil, nil, 0, 0, err
+			return nil, nil, nil, 0, 0, 0, 0, err
 		}
-		circuit = merkleCircuit
+		circuit = mc
 	case CircuitVotingBatch:
-		votingCircuit, err := votingBatchCircuitFromEnv()
+		vc, err := votingBatchCircuitFromEnv()
 		if err != nil {
-			return nil, nil, nil, 0, 0, err
+			return nil, nil, nil, 0, 0, 0, 0, err
 		}
-		circuit = votingCircuit
+		circuit = vc
 	default:
-		return nil, nil, nil, 0, 0, fmt.Errorf("unknown circuit: %s", c)
+		return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("unknown circuit: %s", c)
 	}
 
-	var m1, m2 runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&m1)
-	started := time.Now()
-
-	compileLabel := fmt.Sprintf("frontend.Compile %s", c)
-	compileSample := memtime.Start(compileLabel)
-	cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
-	compileSample.End()
+	// -------------------------------
+	// 2) COMPILE — PEAK MEMORY
+	// -------------------------------
+	var cs constraint.ConstraintSystem
+	compileRes, err := memtime.MeasurePeak(
+		fmt.Sprintf("frontend.Compile %s", c),
+		5*time.Millisecond,
+		func() error {
+			var e error
+			cs, e = frontend.Compile(
+				ecc.BN254.ScalarField(),
+				r1cs.NewBuilder,
+				circuit,
+			)
+			return e
+		},
+	)
 	if err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("compile %s: %w", c, err)
+		return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("compile %s: %w", c, err)
 	}
 
+	compilePeakMB := memtime.BytesToMB(compileRes.PeakBytes)
+	compileTimeMS := int(compileRes.Time.Milliseconds())
+
+	// -------------------------------
+	// 3) LOAD KEYS IF EXIST (NO SETUP)
+	// -------------------------------
 	if !force && fileExists(pkPath) && fileExists(vkPath) {
 		pk, err := readProvingKey(pkPath)
 		if err != nil {
-			return nil, nil, nil, 0, 0, fmt.Errorf("read pk %s: %w", c, err)
+			return nil, nil, nil, 0, 0, 0, 0, err
 		}
 		vk, err := readVerifyingKey(vkPath)
 		if err != nil {
-			return nil, nil, nil, 0, 0, fmt.Errorf("read vk %s: %w", c, err)
+			return nil, nil, nil, 0, 0, 0, 0, err
 		}
 
-		runtime.ReadMemStats(&m2)
-		elapsed := time.Since(started)
-
-		// TotalAlloc is monotonic for the process; a delta around compile+load is a pragmatic signal.
-		usedBytes := int64(0)
-		if m2.TotalAlloc > m1.TotalAlloc {
-			usedBytes = int64(m2.TotalAlloc - m1.TotalAlloc)
-		}
-		memMB := int(usedBytes / (1024 * 1024))
-		timeMS := int(elapsed.Milliseconds())
-		return cs, pk, vk, memMB, timeMS, nil
+		// Setup NOT executed → setup peak = 0
+		return cs, pk, vk,
+			compilePeakMB, compileTimeMS,
+			0, 0,
+			nil
 	}
 
-	pk, vk, err := groth16.Setup(cs)
+	// -------------------------------
+	// 4) SETUP — PEAK MEMORY
+	// -------------------------------
+	var pk groth16.ProvingKey
+	var vk groth16.VerifyingKey
+
+	setupRes, err := memtime.MeasurePeak(
+		fmt.Sprintf("groth16.Setup %s", c),
+		5*time.Millisecond,
+		func() error {
+			var e error
+			pk, vk, e = groth16.Setup(cs)
+			return e
+		},
+	)
 	if err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("groth16 setup %s: %w", c, err)
+		return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("groth16 setup %s: %w", c, err)
 	}
 
-	// Write keys atomically (write to temp then rename) to avoid partial files.
+	setupPeakMB := memtime.BytesToMB(setupRes.PeakBytes)
+	setupTimeMS := int(setupRes.Time.Milliseconds())
+
+	// -------------------------------
+	// 5) WRITE KEYS (not measured)
+	// -------------------------------
 	if err := writeKeyAtomic(pkPath, func(f *os.File) error {
-		_, werr := pk.WriteRawTo(f)
-		return werr
+		_, e := pk.WriteRawTo(f)
+		return e
 	}); err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("write pk %s: %w", c, err)
+		return nil, nil, nil, 0, 0, 0, 0, err
 	}
 
 	if err := writeKeyAtomic(vkPath, func(f *os.File) error {
-		_, werr := vk.WriteRawTo(f)
-		return werr
+		_, e := vk.WriteRawTo(f)
+		return e
 	}); err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("write vk %s: %w", c, err)
+		return nil, nil, nil, 0, 0, 0, 0, err
 	}
 
-	runtime.ReadMemStats(&m2)
-	elapsed := time.Since(started)
-
-	// TotalAlloc is monotonic for the process; a delta around compile+setup is a pragmatic signal.
-	usedBytes := int64(0)
-	if m2.TotalAlloc > m1.TotalAlloc {
-		usedBytes = int64(m2.TotalAlloc - m1.TotalAlloc)
-	}
-	memMB := int(usedBytes / (1024 * 1024))
-	timeMS := int(elapsed.Milliseconds())
-	return cs, pk, vk, memMB, timeMS, nil
+	return cs, pk, vk,
+		compilePeakMB, compileTimeMS,
+		setupPeakMB, setupTimeMS,
+		nil
 }
+
+// -----------------------------------------------------------------------------
+// Helpers (unchanged except removing mem accounting)
+// -----------------------------------------------------------------------------
 
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
@@ -134,10 +172,8 @@ func readProvingKey(path string) (groth16.ProvingKey, error) {
 	defer f.Close()
 
 	pk := groth16.NewProvingKey(ecc.BN254)
-	if _, err := pk.ReadFrom(f); err != nil {
-		return nil, err
-	}
-	return pk, nil
+	_, err = pk.ReadFrom(f)
+	return pk, err
 }
 
 func readVerifyingKey(path string) (groth16.VerifyingKey, error) {
@@ -148,10 +184,8 @@ func readVerifyingKey(path string) (groth16.VerifyingKey, error) {
 	defer f.Close()
 
 	vk := groth16.NewVerifyingKey(ecc.BN254)
-	if _, err := vk.ReadFrom(f); err != nil {
-		return nil, err
-	}
-	return vk, nil
+	_, err = vk.ReadFrom(f)
+	return vk, err
 }
 
 func writeKeyAtomic(path string, writeFn func(*os.File) error) error {
@@ -175,31 +209,9 @@ func writeKeyAtomic(path string, writeFn func(*os.File) error) error {
 	return os.Rename(tmp, path)
 }
 
-// CompileOnly is a helper for tests or future enhancements.
-func CompileOnly(c CircuitName) (constraint.ConstraintSystem, error) {
-	switch c {
-	case CircuitMerkleProof:
-		merkleCircuit, err := merkleCircuitFromEnv()
-		if err != nil {
-			return nil, err
-		}
-		sample := memtime.Start("frontend.Compile merkle_proof")
-		cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, merkleCircuit)
-		sample.End()
-		return cs, err
-	case CircuitVotingBatch:
-		votingCircuit, err := votingBatchCircuitFromEnv()
-		if err != nil {
-			return nil, err
-		}
-		sample := memtime.Start("frontend.Compile voting_batch")
-		cs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, votingCircuit)
-		sample.End()
-		return cs, err
-	default:
-		return nil, fmt.Errorf("unknown circuit: %s", c)
-	}
-}
+// -----------------------------------------------------------------------------
+// Circuit builders (unchanged)
+// -----------------------------------------------------------------------------
 
 func merkleCircuitFromEnv() (*merkleproof.MerkleProofCircuit, error) {
 	depthStr := os.Getenv("INC_TREE_DEPTH")

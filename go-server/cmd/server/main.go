@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -138,16 +136,7 @@ func resolveKeyDir() string {
 }
 
 func resolveLogFile() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return filepath.Join("logs", "server.log")
-	}
-	// If started from repo root, prefer go-server/logs/server.log.
-	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
-		return filepath.Join(wd, "go-server", "logs", "server.log")
-	}
-	// Otherwise assume current working dir is go-server/.
-	return filepath.Join(wd, "logs", "server.log")
+	return filepath.Join(resolveLogDir(), "server.log")
 }
 
 func resolveTxCSVLogFile(nodeCount, batchSize int) string {
@@ -160,19 +149,9 @@ func resolveTxCSVLogFile(nodeCount, batchSize int) string {
 	}
 	txCSVPathMu.Unlock()
 
-	wd, err := os.Getwd()
-	var dir string
-	if err != nil {
-		dir = filepath.Join("logs")
-	} else if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
-		dir = filepath.Join(wd, "go-server", "logs")
-	} else {
-		dir = filepath.Join(wd, "logs")
-	}
-
-	prefix := fmt.Sprintf("n%d_b%d_", nodeCount, batchSize)
-	counter := nextCSVCounter(dir, prefix)
-	path := filepath.Join(dir, fmt.Sprintf("%s%d.csv", prefix, counter))
+	dir := resolveLogDir()
+	filename := fmt.Sprintf("n%d_b%d.csv", nodeCount, batchSize)
+	path := filepath.Join(dir, filename)
 
 	txCSVPathMu.Lock()
 	txCSVPathCache[key] = path
@@ -181,30 +160,13 @@ func resolveTxCSVLogFile(nodeCount, batchSize int) string {
 	return path
 }
 
-func nextCSVCounter(dir, prefix string) int {
-	entries, err := os.ReadDir(dir)
+func resolveLogDir() string {
+	wd, err := os.Getwd()
 	if err != nil {
-		return 1
+		return filepath.Join("logs")
 	}
-
-	max := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".csv") {
-			continue
-		}
-		numStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".csv")
-		n, err := strconv.Atoi(numStr)
-		if err != nil {
-			continue
-		}
-		if n > max {
-			max = n
-		}
+	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
+		return filepath.Join(wd, "go-server", "logs")
 	}
-
-	return max + 1
+	return filepath.Join(wd, "logs")
 }

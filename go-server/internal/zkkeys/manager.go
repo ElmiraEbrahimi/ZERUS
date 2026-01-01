@@ -43,8 +43,10 @@ type KeyStatus struct {
 
 // KeyGenMetrics summarizes resource usage for compilation + setup.
 type KeyGenMetrics struct {
-	MemoryMB int `json:"memory_mb"`
-	TimeMS   int `json:"time_ms"`
+	CompilePeakMB int `json:"compile_peak_mb"`
+	CompileTimeMS int `json:"compile_time_ms"`
+	SetupPeakMB   int `json:"setup_peak_mb"`
+	SetupTimeMS   int `json:"setup_time_ms"`
 }
 
 // KeyGenResult is returned by generation calls.
@@ -150,19 +152,32 @@ func (m *Manager) Generate(c CircuitName) (KeyGenResult, error) {
 		return KeyGenResult{}, fmt.Errorf("create circuit dir: %w", err)
 	}
 
-	_, _, _, memMB, timeMS, err := GenerateKeysToFiles(c, p.PK, p.VK, false)
+	_, _, _,
+		compilePeakMB, compileTimeMS,
+		setupPeakMB, setupTimeMS,
+		err := GenerateKeysToFiles(c, p.PK, p.VK, false)
 	if err != nil {
 		return KeyGenResult{}, err
 	}
 
-	log.Printf("generated keys for %s (pk=%s vk=%s) in %dms, peak mem %dMB", c, p.PK, p.VK, timeMS, memMB)
+	log.Printf(
+		"generated keys for %s | compile: %dMB %dms | setup: %dMB %dms",
+		c,
+		compilePeakMB, compileTimeMS,
+		setupPeakMB, setupTimeMS,
+	)
 
 	return KeyGenResult{
 		Circuit:   c,
 		Generated: true,
 		Already:   false,
 		Paths:     p,
-		Metrics:   KeyGenMetrics{MemoryMB: memMB, TimeMS: timeMS},
+		Metrics: KeyGenMetrics{
+			CompilePeakMB: compilePeakMB,
+			CompileTimeMS: compileTimeMS,
+			SetupPeakMB:   setupPeakMB,
+			SetupTimeMS:   setupTimeMS,
+		},
 	}, nil
 }
 

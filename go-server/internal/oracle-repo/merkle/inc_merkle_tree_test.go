@@ -36,6 +36,9 @@ func TestValidatorAndWithdrawer(t *testing.T) {
 		commitmentHash := mimcHash.Sum(nil)
 
 		fmt.Printf("Validator: Commitment Hash: %x\n", commitmentHash)
+		if _, _, _, err := tree.AddLeafValidator(commitmentHash); err != nil {
+			t.Fatalf("Error adding leaf: %v", err)
+		}
 	}
 
 	// Withdrawer generates proof for leaf 5

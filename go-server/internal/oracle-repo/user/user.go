@@ -25,11 +25,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
 	"github.com/consensys/gnark-crypto/hash"
 	"github.com/consensys/gnark/backend/groth16"
+	gnarkwitness "github.com/consensys/gnark/backend/witness"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -501,12 +503,6 @@ func (u *User) WithdrawTx() (string, error) {
 		witness.M.Path[i] = frontend.Variable(new(big.Int).SetBytes(proofPath[i]))
 	}
 
-	// generate the proof
-	fullWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField())
-	if err != nil {
-		return "", fmt.Errorf("failed to create witness (user=%v): %v", u.Name, err)
-	}
-
 	fmt.Println("Debugging Witness Before Proof Generation:")
 	fmt.Printf("Nullifier: %x\n", witness.Nullifier)
 	fmt.Printf("Secret: %x\n", witness.Secret)
@@ -520,24 +516,53 @@ func (u *User) WithdrawTx() (string, error) {
 		fmt.Printf("Merkle Path[%d]: %x\n", i, path)
 	}
 
-	proveSample := memtime.Start("groth16.Prove merkle_proof")
-	proof, err := groth16.Prove(u.R1CS, u.PK, fullWitness)
-	proveSample.End()
+	var (
+		fullWitness gnarkwitness.Witness
+		proof       groth16.Proof
+	)
+
+	pres, err := memtime.MeasurePeak(
+		"groth16.Prove merkle_proof",
+		5*time.Millisecond,
+		func() error {
+			var e error
+
+			fullWitness, e = frontend.NewWitness(&witness, ecc.BN254.ScalarField())
+			if e != nil {
+				return e
+			}
+
+			proof, e = groth16.Prove(u.R1CS, u.PK, fullWitness)
+			return e
+		},
+	)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate Groth16 proof (user=%v): %v", u.Name, err)
+		return "", fmt.Errorf("failed to prove (user=%v): %v", u.Name, err)
 	}
+
+	provePeakMB := memtime.BytesToMB(pres.PeakBytes)
+	proveTimeMS := int(pres.Time.Milliseconds())
+	log.Printf("USER PROVE peak=%dMB time=%dms", provePeakMB, proveTimeMS)
 
 	publicWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if err != nil {
 		return "", fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
 	}
 
-	verifySample := memtime.Start("groth16.Verify merkle_proof")
-	err = groth16.Verify(proof, u.VK, publicWitness)
-	verifySample.End()
+	vres, err := memtime.MeasurePeak(
+		"groth16.Verify merkle_proof",
+		5*time.Millisecond,
+		func() error {
+			return groth16.Verify(proof, u.VK, publicWitness)
+		},
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to verify proof (user=%v): %v", u.Name, err)
 	}
+
+	verifyPeakMB := memtime.BytesToMB(vres.PeakBytes)
+	verifyTimeMS := int(vres.Time.Milliseconds())
+	log.Printf("USER VERIFY peak=%dMB time=%dms", verifyPeakMB, verifyTimeMS)
 
 	// send trx to claim:
 	log.Printf("claiming (user=%v)...", u.Name)

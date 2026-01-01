@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/consensys/gnark-crypto/ecc"
+	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
 	"github.com/consensys/gnark-crypto/hash"
 )
 

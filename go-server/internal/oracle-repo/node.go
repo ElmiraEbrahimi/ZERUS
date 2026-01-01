@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
@@ -284,15 +285,11 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 	}
 
 	var isApproved *big.Int
-	verifySample := memtime.Start("groth16.Verify inc_claim")
-	err = groth16.Verify(proof, n.Oracle.IncVK, publicWitness)
-	verifySample.End()
-
-	if err != nil {
+	if err := groth16.Verify(proof, n.Oracle.IncVK, publicWitness); err != nil {
 		fmt.Printf("failed to verify claim proof (node=%v): %v\n", n.ID, err)
 		isApproved = big.NewInt(0)
 	} else {
-		fmt.Printf("successfully verified claim merkle proof and MiMC hash! (node=%v)\n", n.ID)
+		fmt.Printf("successfully verified claim proof (node=%v)\n", n.ID)
 		isApproved = big.NewInt(1)
 	}
 
@@ -843,12 +840,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		if err != nil {
 			return nil, fmt.Errorf("write account: %w", err)
 		}
-
-		// *****************************************************************************
-		err = n.state.WriteAccount(validatorAccount)
-		if err != nil {
-			return nil, fmt.Errorf("write account: %w", err)
-		}
 	}
 
 	postStateRoot, err := n.state.Root()
@@ -891,29 +882,62 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	fmt.Printf("Aggregator: %+v\n", aggregatorConstraints)
 	fmt.Printf("Validators: %+v\n", validatorConstraints)
 
-	witness, err := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+	var (
+		w witness.Witness
+		p groth16.Proof
+	)
+
+	res, err := memtime.MeasurePeak(
+		"groth16.Prove voting_batch",
+		5*time.Millisecond,
+		func() error {
+			var e error
+			w, e = frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
+			if e != nil {
+				return fmt.Errorf("create witness: %w", e)
+			}
+
+			p, e = groth16.Prove(n.Oracle.SparseR1CS, n.Oracle.SparsePK, w)
+			return e
+		},
+	)
 	if err != nil {
-		return nil, fmt.Errorf("create witness: %w", err)
+		return nil, fmt.Errorf("prove: %w", err)
 	}
 
-	proveSample := memtime.Start("groth16.Prove voting_batch")
-	p, err := groth16.Prove(n.Oracle.SparseR1CS, n.Oracle.SparsePK, witness)
-	proveSample.End()
-	if err != nil {
-		return nil, fmt.Errorf("prove: %v", err)
-	}
+	provePeakMB := memtime.BytesToMB(res.PeakBytes)
+	proveTimeMS := int(res.Time.Milliseconds())
 
-	pw, err := witness.Public()
+	log.Printf(
+		"AGGREGATOR PROVE peak=%dMB time=%dms",
+		provePeakMB,
+		proveTimeMS,
+	)
+
+	pw, err := w.Public()
 	if err != nil {
 		return nil, fmt.Errorf("public witness: %w", err)
 	}
 
-	verifySample := memtime.Start("groth16.Verify voting_batch")
-	err = groth16.Verify(p, n.Oracle.SparseVK, pw) // TODO: delete maybe later
-	verifySample.End()
+	vres, err := memtime.MeasurePeak(
+		"groth16.Verify voting_batch",
+		5*time.Millisecond,
+		func() error {
+			return groth16.Verify(p, n.Oracle.SparseVK, pw)
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("verify proof: %w", err)
 	}
+
+	verifyPeakMB := memtime.BytesToMB(vres.PeakBytes)
+	verifyTimeMS := int(vres.Time.Milliseconds())
+
+	log.Printf(
+		"AGGREGATOR VERIFY peak=%dMB time=%dms",
+		verifyPeakMB,
+		verifyTimeMS,
+	)
 
 	proof, err := util.ProofToEthereumProof(p)
 	if err != nil {

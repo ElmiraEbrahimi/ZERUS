@@ -8,12 +8,18 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"l2alchemy/internal/memtime"
 	"l2alchemy/internal/zkkeys"
 )
 
 func main() {
 	_ = godotenv.Load(".env")
 	_ = godotenv.Load("../.env")
+	if f, err := memtime.SetupFromEnv(); err != nil {
+		log.Printf("memtime csv: setup failed: %v", err)
+	} else if f != nil {
+		defer memtime.CloseMemTimeCSV()
+	}
 
 	keyDir := resolveKeyDir()
 	paths := zkkeys.PathsFor(keyDir, zkkeys.CircuitMerkleProof)
@@ -21,7 +27,7 @@ func main() {
 		log.Fatalf("mkdir %s: %v", filepath.Dir(paths.PK), err)
 	}
 	force := strings.EqualFold(os.Getenv("FORCE_ZK_KEYGEN"), "1") || strings.EqualFold(os.Getenv("FORCE_ZK_KEYGEN"), "true")
-	_, _, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, paths.PK, paths.VK, force)
+	_, _, vk, _, _, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, paths.PK, paths.VK, force)
 	if err != nil {
 		log.Fatalf("generate keys: %v", err)
 	}

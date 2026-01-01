@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -138,9 +139,7 @@ func ResolveMemTimeCSVPath(nodeCount, batchSize int) string {
 	memCSVPathMu.Unlock()
 
 	dir := resolveMemTimeDir()
-	prefix := fmt.Sprintf("n%d_b%d_", nodeCount, batchSize)
-	counter := nextCSVCounter(dir, prefix)
-	filename := fmt.Sprintf("%s%d.csv", prefix, counter)
+	filename := fmt.Sprintf("n%d_b%d.csv", nodeCount, batchSize)
 	path := filepath.Join(dir, filename)
 
 	memCSVPathMu.Lock()
@@ -151,32 +150,6 @@ func ResolveMemTimeCSVPath(nodeCount, batchSize int) string {
 	memCSVPathMu.Unlock()
 
 	return path
-}
-
-func nextCSVCounter(dir, prefix string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 1
-	}
-	maxCounter := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".csv") {
-			continue
-		}
-		counterStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".csv")
-		counter, err := strconv.Atoi(counterStr)
-		if err != nil || counter < 1 {
-			continue
-		}
-		if counter > maxCounter {
-			maxCounter = counter
-		}
-	}
-	return maxCounter + 1
 }
 
 func logSample(start time.Time, source string, duration time.Duration, usedBytes uint64) {
@@ -203,6 +176,81 @@ func logSample(start time.Time, source string, duration time.Duration, usedBytes
 	if err := memCSVWriter.Error(); err != nil {
 		log.Printf("memtime csv: flush failed: %v", err)
 	}
+}
+
+// PeakResult is the result of a peak-memory measurement.
+type PeakResult struct {
+	PeakBytes uint64
+	Time      time.Duration
+}
+
+// MeasurePeak samples runtime.MemStats.Alloc while fn is running.
+// It returns (peakAllocDuringFn - baselineAllocBeforeFn).
+func MeasurePeak(source string, interval time.Duration, fn func() error) (PeakResult, error) {
+	if interval <= 0 {
+		interval = 5 * time.Millisecond
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "unknown"
+	}
+
+	// Reduce noise
+	runtime.GC()
+
+	var base runtime.MemStats
+	runtime.ReadMemStats(&base)
+
+	var peak uint64
+	peak = base.Alloc
+
+	start := time.Now()
+	done := make(chan struct{})
+
+	// sampler
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				var ms runtime.MemStats
+				runtime.ReadMemStats(&ms)
+				// update peak
+				for {
+					old := atomic.LoadUint64(&peak)
+					if ms.Alloc <= old {
+						break
+					}
+					if atomic.CompareAndSwapUint64(&peak, old, ms.Alloc) {
+						break
+					}
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	err := fn()
+	close(done)
+
+	elapsed := time.Since(start)
+	p := atomic.LoadUint64(&peak)
+
+	used := uint64(0)
+	if p > base.Alloc {
+		used = p - base.Alloc
+	}
+
+	// Log peak as MB to your CSV (same CSV system you already have)
+	logSample(start, source+" (PEAK)", elapsed, used)
+
+	return PeakResult{PeakBytes: used, Time: elapsed}, err
+}
+
+func BytesToMB(b uint64) int {
+	return int(b / (1024 * 1024))
 }
 
 func ensureWriter() {

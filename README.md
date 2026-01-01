@@ -125,6 +125,9 @@ curl -X POST http://localhost:18000/validators/register -H "Content-Type: applic
 curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"
 curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"
 curl http://localhost:18000/users/default/balance
+curl -X POST http://localhost:18000/validators/replace -H "Content-Type: application/json" -d '{"node_id":0,"replace_with_account_id":1}'
+curl -X POST http://localhost:18000/validators/exit -H "Content-Type: application/json" -d '{"node_id":0}'
+curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: application/json" -d '{"node_id":0}'
 ```
 
 ## API Endpoints

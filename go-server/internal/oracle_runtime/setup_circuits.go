@@ -33,7 +33,7 @@ func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleP
 	if !fileExists(pkPath) || !fileExists(vkPath) {
 		panic(fmt.Errorf("merkle keys missing (pk=%s vk=%s); run `make generate` or `make deploy`", pkPath, vkPath))
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, false)
+	_r1cs, pk, vk, _, _, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitMerkleProof, pkPath, vkPath, false)
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +64,7 @@ func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.Batchin
 	if !fileExists(pkPath) || !fileExists(vkPath) {
 		panic(fmt.Errorf("voting batch keys missing (pk=%s vk=%s); run `make generate` or `make deploy`", pkPath, vkPath))
 	}
-	_r1cs, pk, vk, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, false)
+	_r1cs, pk, vk, _, _, _, _, err := zkkeys.GenerateKeysToFiles(zkkeys.CircuitVotingBatch, pkPath, vkPath, false)
 	if err != nil {
 		panic(err)
 	}
