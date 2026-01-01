@@ -12,6 +12,7 @@ import (
 
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
+	"l2alchemy/internal/logging"
 	"l2alchemy/internal/oracle_runtime"
 	"l2alchemy/internal/oracle_runtime/events"
 	"l2alchemy/internal/server/handlers"
@@ -21,6 +22,12 @@ import (
 )
 
 func main() {
+	logFile, err := logging.Setup(resolveLogFile())
+	if err != nil {
+		log.Fatalf("failed to set up logging: %v", err)
+	}
+	defer logFile.Close()
+
 	// Best-effort load of a .env file (repo root).
 	//
 	// Supported run modes:
@@ -99,4 +106,17 @@ func resolveKeyDir() string {
 	}
 	// Otherwise assume current working dir is go-server/.
 	return filepath.Join(wd, "circuits", "build", "keys")
+}
+
+func resolveLogFile() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return filepath.Join("logs", "server.log")
+	}
+	// If started from repo root, prefer go-server/logs/server.log.
+	if st, err := os.Stat(filepath.Join(wd, "go-server")); err == nil && st.IsDir() {
+		return filepath.Join(wd, "go-server", "logs", "server.log")
+	}
+	// Otherwise assume current working dir is go-server/.
+	return filepath.Join(wd, "logs", "server.log")
 }

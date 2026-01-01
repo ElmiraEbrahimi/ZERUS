@@ -20,7 +20,7 @@ import (
 )
 
 const l2LogsChanBuffer = 256
-const l2PollInterval = 5 * time.Second
+const l2PollInterval = 1 * time.Second
 
 // L2ContractEventSubscriber subscribes to L2 contract logs and keeps a handle to the
 // oracle engine so events can be applied to the runtime state.

@@ -59,6 +59,11 @@ func (h *CounterHandler) IncrementCounter(w http.ResponseWriter, r *http.Request
 		http.Error(w, "failed to send transaction", http.StatusInternalServerError)
 		return
 	}
+	go func() {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer waitCancel()
+		eth.WaitAndLogTxReceipt(waitCtx, h.counter.Eth, "counter increment", tx)
+	}()
 	resp := txResponse{TxHash: tx.Hash().Hex()}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

@@ -1,178 +1,143 @@
+# L2-Alchemy
 
-# zkSync Local Stack + Counter Contract + Go HTTP API
-
-This repository extends the Matter Labs **dockerized L2 stack** with:
-
-- A **Foundry project** containing a simple `Counter` contract  
-- A **deterministic deployment script** for zkSync local chain (chain ID `271`)  
-- A **Go HTTP API server** (Go 1.24, geth 1.16.7) exposing REST endpoints that interact with the Counter contract  
-- A **Dockerized Go service** included in the zk-chains Docker Compose stack  
-
-## Table of Contents
-
-1. Prerequisites
-2. Repository Structure
-3. Start the zkSync Local Environment
-4. Deploy the Counter Contract
-5. Generate Go Bindings (Optional)
-6. Start the Go HTTP API
-7. API Usage Examples
-8. Environment Variables
-9. Makefile Shortcuts
+Local zkSync stack + Foundry contracts + a Go HTTP API that drives the Counter
+contract and the on-chain Oracle flow.
 
 ## Prerequisites
 
-Install:
-
 - Docker + Docker Compose
-- Foundry (forge/cast)
+- Foundry + foundry-zksync
 - Go 1.24.x
-- abigen (optional)
+- abigen (only needed for deploy targets that regenerate bindings)
 
-## Repository Structure
-
-```
-dockerized_l2/
-├── local-setup/
-├── contracts/
-│   ├── src/Counter.sol
-│   ├── script/DeployCounter.s.sol
-│   └── foundry.toml
-├── go-server/
-│   ├── cmd/server/main.go
-│   ├── internal/{config,eth,server}
-│   ├── Dockerfile
-│   └── go.mod
-└── Makefile
-```
-
-## Start the zkSync Local Environment
+## Repository Layout
 
 ```
+contracts/    # Foundry contracts + deploy scripts
+go-server/    # Go HTTP API + oracle runtime
+local-setup/  # zkSync local stack scripts + compose files
+Makefile      # handy wrapper targets
+```
+
+## Quickstart (single L2)
+
+1. Create a local env file and update values as needed:
+
+```sh
+cp .env.example .env
+```
+
+For the default local stack, set `ZKSYNC_RPC_URL=http://localhost:3050` and
+`ZKSYNC_CHAIN_ID=270`. You can grab a funded dev key from
+`local-setup/rich-wallets.json`.
+
+2. Start the local zkSync stack:
+
+```sh
 make up
 ```
 
-Endpoints:
+3. Deploy contracts and regenerate Go bindings:
 
-| Component     | URL                    |
-| ------------- | ---------------------- |
-| L2 JSON-RPC   | http://localhost:15100 |
-| L2 WS         | ws://localhost:15101   |
-| Explorer      | http://localhost:15005 |
-| Hyperexplorer | http://localhost:15000 |
-
-## Deploy the Counter Contract
-
-```
-export ZKSYNC_PRIVATE_KEY=<private key>
-export ZKSYNC_RPC_URL=http://localhost:15100
-
-cd contracts
-forge script script/DeployCounter.s.sol --rpc-url $ZKSYNC_RPC_URL --broadcast --private-key $ZKSYNC_PRIVATE_KEY
+```sh
+make deploy
 ```
 
-Capture the deployed contract address and export:
+`make deploy` requires `abigen` to be available in your PATH.
 
-```
-export COUNTER_CONTRACT_ADDRESS=0x...
-```
+4. Start the Go API server:
 
-## Generate Go Bindings (Optional)
-
-```
-cd contracts
-abigen   --abi out/Counter.sol/Counter.abi.json   --bin out/Counter.sol/Counter.bin   --pkg eth   --type Counter   --out ../go-server/internal/eth/counter_binding.go
+```sh
+make server
 ```
 
-## Start the Go HTTP API
+The API binds to `HTTP_BIND_ADDR` (default `:18000` from `.env.example`).
 
-```
-export ZKSYNC_RPC_URL=http://localhost:15100
-export ZKSYNC_CHAIN_ID=271
-export ZKSYNC_PRIVATE_KEY=0x...
-export COUNTER_CONTRACT_ADDRESS=0x...
-export HTTP_BIND_ADDR=:18000
+## Local zkSync Ports (single L2)
 
-cd go-server
-go run ./cmd/server
-```
+These are the defaults from `local-setup/docker-compose.yml`:
 
-## API Usage
+| Component   | URL                   |
+| ----------- | --------------------- |
+| L2 JSON-RPC | http://localhost:3050 |
+| L2 WS       | ws://localhost:3051   |
 
-### Read counter value
+## ZK Chains (multi L2, optional)
 
-```
-curl http://localhost:18000/counter
-```
+If you want the multi-chain stack with explorers, run:
 
-### Increment counter
-
-```
-curl -X POST http://localhost:18000/counter/increment
+```sh
+cd local-setup
+./start-zk-chains.sh
 ```
 
-### Health check
+Defaults from `local-setup/zk-chains-docker-compose.yml`:
 
-```
-curl http://localhost:18000/health
-```
+| Component          | URL                    |
+| ------------------ | ---------------------- |
+| L2 JSON-RPC (L2-0) | http://localhost:15100 |
+| L2 WS (L2-0)       | ws://localhost:15101   |
+| Explorer           | http://localhost:15005 |
+| Hyperexplorer      | http://localhost:15000 |
+
+Set `ZKSYNC_RPC_URL` and `ZKSYNC_CHAIN_ID` accordingly if you use this mode
+(the Foundry config targets chain ID 271 for zk-chains).
 
 ## Environment Variables
 
-| Variable                 | Purpose            |
-| ------------------------ | ------------------ |
-| ZKSYNC_RPC_URL           | RPC endpoint       |
-| ZKSYNC_CHAIN_ID          | Must be 271        |
-| ZKSYNC_PRIVATE_KEY       | Signer private key |
-| COUNTER_CONTRACT_ADDRESS | Contract address   |
-| HTTP_BIND_ADDR           | Bind address       |
+The Go server requires a full set of environment variables. Use
+`.env.example` as the source of truth. The most commonly edited values are:
+
+| Variable                 | Purpose                  |
+| ------------------------ | ------------------------ |
+| ZKSYNC_RPC_URL           | L2 HTTP RPC endpoint     |
+| ZKSYNC_CHAIN_ID          | L2 chain ID              |
+| ZKSYNC_PRIVATE_KEY       | deployer/signer key      |
+| HTTP_BIND_ADDR           | API bind address         |
+| COUNTER_CONTRACT_ADDRESS | Counter contract address |
+| ORACLE_CONTRACT_ADDRESS  | Oracle contract address  |
+
+The deploy targets update contract address fields inside `.env` automatically.
 
 ## Makefile Shortcuts
 
 ```sh
-make up
-make down
-make deploy
+make up          # start local-setup
+make down        # stop and clear local-setup
+make up-deploy   # start local-setup + deploy contracts
+make deploy      # deploy all contracts and regenerate bindings
+make server      # run the Go API server
+```
+
+## Workflow
+
+Terminal 1 (blockchain and server)
+```sh
+make down  # optional
+make up-deploy
 make server
-make build-docker
 ```
 
-## Install Forge
-
+Terminal 2 (requests)
 ```sh
-curl -L https://foundry.paradigm.xyz | bash
+curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json"
+curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"
+curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"
+curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"
+curl http://localhost:18000/users/default/balance
 ```
 
-and then:
+## API Endpoints
 
-```sh
-foundryup
-```
-
-### foundry-zksync
-
-```sh
-curl -L https://raw.githubusercontent.com/matter-labs/foundry-zksync/main/install-foundry-zksync | bash
-```
-
-```sh
-foundryup-zksync
-```
-
-## Run
-
-1. make zksync  # wait for it set up
-2. make deploy  # deploys and copies the contract address to go-server
-3. make server  # runs the server
-
-### test go-server api
-
-```sh
-curl http://localhost:18000/health
-curl http://localhost:18000/counter
-curl -X POST http://localhost:18000/counter/increment 
-curl http://localhost:18000/counter
-
-curl -X POST http://localhost:18000/circuits/keygen -H "Content-Type: application/json"
-curl http://localhost:18000/circuits/keys 
-```
+| Method | Path                    | Example                                                                                          |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------------------ |
+| GET    | /counter                | `curl http://localhost:18000/counter`                                                            |
+| POST   | /counter/increment      | `curl -X POST http://localhost:18000/counter/increment`                                          |
+| GET    | /health                 | `curl http://localhost:18000/health`                                                             |
+| POST   | /circuits/keygen        | `curl -X POST http://localhost:18000/circuits/keygen -H "Content-Type: application/json"`        |
+| GET    | /circuits/keys          | `curl http://localhost:18000/circuits/keys`                                                      |
+| POST   | /users/default/register | `curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json"` |
+| GET    | /users/default/balance  | `curl http://localhost:18000/users/default/balance`                                              |
+| POST   | /users/default/burn     | `curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"`     |
+| POST   | /users/default/withdraw | `curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"` |
+| POST   | /validators/register    | `curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"`    |

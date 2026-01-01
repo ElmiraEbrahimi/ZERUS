@@ -897,7 +897,7 @@ func (n *Node) selectNewAggregatorTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	logTxReceipt("select new aggregator", tx, receipt)
+	bc.LogTxReceipt("select new aggregator", tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully called SelectNewAggregatorTx (by oracle)\n")
 	} else {
@@ -935,7 +935,7 @@ func (n *Node) RegisterValidatorTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	logTxReceipt(fmt.Sprintf("register validator node=%v", n.ID), tx, receipt)
+	bc.LogTxReceipt(fmt.Sprintf("register validator node=%v", n.ID), tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully registered validator node=%v\n", n.ID)
 	} else {
@@ -996,30 +996,6 @@ func (n *Node) revertReason(ctx context.Context, tx *types.Transaction, blockNum
 	return reason, ""
 }
 
-func logTxReceipt(label string, tx *types.Transaction, receipt *types.Receipt) {
-	if tx == nil || receipt == nil {
-		return
-	}
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = tx.GasPrice()
-	}
-	gasCostWei := new(big.Int)
-	if effectiveGasPrice != nil {
-		gasCostWei.Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveGasPrice)
-	} else {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	log.Printf(
-		"%s tx: hash=%s gasUsed=%d gasPrice=%s gasCost=%s wei",
-		label,
-		tx.Hash().Hex(),
-		receipt.GasUsed,
-		effectiveGasPrice.String(),
-		gasCostWei.String(),
-	)
-}
-
 func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	fmt.Printf("updating latest ipfs hash (validator=%v) ...\n", n.ID)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
@@ -1046,7 +1022,7 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	logTxReceipt("update latest ipfs hash", tx, receipt)
+	bc.LogTxReceipt("update latest ipfs hash", tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully updated ipfs hash (node=%v)\n", n.ID)
 	} else {
@@ -1094,7 +1070,7 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	logTxReceipt("submit wivote", tx, receipt)
+	bc.LogTxReceipt("submit wivote", tx, receipt)
 
 	if receipt.Status == 1 {
 		fmt.Printf("successfully submitted wivote (node=%v)\n", n.ID)
@@ -1167,7 +1143,7 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	}
 
 	if receipt.Status == 1 {
-		logTxReceipt(fmt.Sprintf("replace account index=%d", account.Index.Uint64()), tx, receipt)
+		bc.LogTxReceipt(fmt.Sprintf("replace account index=%d", account.Index.Uint64()), tx, receipt)
 	} else {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1231,7 +1207,7 @@ func (n *Node) ExitTx() error {
 	}
 
 	if receipt.Status == 1 {
-		logTxReceipt(fmt.Sprintf("exit account index=%d", account.Index.Uint64()), tx, receipt)
+		bc.LogTxReceipt(fmt.Sprintf("exit account index=%d", account.Index.Uint64()), tx, receipt)
 	} else {
 		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
 	}
@@ -1292,7 +1268,7 @@ func (n *Node) WithdrawAccountTx() error {
 	if err != nil {
 		log.Fatalf("failed to wait for withdraw tx (index=%d): %v", account.Index.Uint64(), err)
 	}
-	logTxReceipt(fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()), tx, receipt)
+	bc.LogTxReceipt(fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()), tx, receipt)
 
 	if receipt.Status == 1 {
 		log.Printf("withdrawn account index=%d", account.Index.Uint64())

@@ -323,18 +323,12 @@ func (u *User) RegisterUserTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("wait for tx mined: %w", err)
 	}
+	bc.LogTxReceipt(fmt.Sprintf("register user name=%s", u.Name), tx, receipt)
 	if receipt.Status != 1 {
 		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
 
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = tx.GasPrice()
-	}
-	gasCostWei := new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveGasPrice)
-	fmt.Printf("user register tx: hash=%s gasUsed=%d gasPrice=%s gasCost=%s wei\n", tx.Hash().Hex(), receipt.GasUsed, effectiveGasPrice.String(), gasCostWei.String())
-
-	fmt.Printf("successfully registered user=%v (tx=%s)\n", u.Name, tx.Hash().Hex())
+	log.Printf("successfully registered user=%v (tx=%s)", u.Name, tx.Hash().Hex())
 	return tx.Hash().Hex(), nil
 }
 
@@ -363,7 +357,7 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 }
 
 func (u *User) BurnTx() (string, string, error) {
-	fmt.Printf("user=%v is burning...\n", u.Name)
+	log.Printf("user=%v is burning...", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
@@ -402,10 +396,11 @@ func (u *User) BurnTx() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
+	bc.LogTxReceipt(fmt.Sprintf("burn user=%s", u.Name), tx, receipt)
 	if receipt.Status != 1 {
 		return "", "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
-	fmt.Printf("successfully burned from user=%v\n", u.Name)
+	log.Printf("successfully burned from user=%v", u.Name)
 
 	// save the calculated values:
 	u.commitmentHashBytes = commitmentHashBytes[:]
@@ -511,7 +506,7 @@ func (u *User) WithdrawTx() (string, error) {
 	}
 
 	// send trx to claim:
-	fmt.Printf("claiming (user=%v) ...\n", u.Name)
+	log.Printf("claiming (user=%v)...", u.Name)
 	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
 	if err != nil {
@@ -556,8 +551,9 @@ func (u *User) WithdrawTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
+	bc.LogTxReceipt(fmt.Sprintf("claim user=%s", u.Name), tx, receipt)
 	if receipt.Status == 1 {
-		fmt.Printf("successfully sent claim trx (user=%v)\n", u.Name)
+		log.Printf("successfully sent claim tx (user=%v)", u.Name)
 	} else {
 		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
