@@ -7,7 +7,12 @@ server_pgid=""
 logger_pid=""
 server_tmp=""
 server_port=18001
+sleep_base=3
 script_pgid="$(ps -o pgid= $$ | tr -d ' ')"
+
+calc_sleep_with_nodes() {
+	awk -v base="$sleep_base" -v nodes="${node_count:-0}" 'BEGIN { printf "%.1f", base + (nodes * 0.5) }'
+}
 
 kill_tree() {
 	local pid="${1:-}"
@@ -96,7 +101,7 @@ cleanup_server() {
 trap cleanup_server EXIT
 
 usage() {
-	echo "Usage: $0 [-r <runs>] [-n <node-count>] [-b <batch-size>]"
+	echo "Usage: $0 [-r <runs>] [-n <node-count>] [-b <batch-size>] [-s <sleep-seconds>]"
 	echo "       $0 [--runs <runs>]"
 	echo "       If --runs is not provided, it defaults to 50."
 }
@@ -149,9 +154,10 @@ node_count_arg=""
 batch_size_arg=""
 node_count_set=0
 batch_size_set=0
+sleep_base_set=0
 
 OPTIND=1
-while getopts ":r:n:b:-:" opt; do
+while getopts ":r:n:b:s:-:" opt; do
 	case "$opt" in
 	r)
 		runs="$OPTARG"
@@ -164,6 +170,10 @@ while getopts ":r:n:b:-:" opt; do
 	b)
 		batch_size_arg="$OPTARG"
 		batch_size_set=1
+		;;
+	s)
+		sleep_base="$OPTARG"
+		sleep_base_set=1
 		;;
 	-)
 		case "$OPTARG" in
@@ -196,9 +206,23 @@ if ! [[ "$runs" =~ ^[0-9]+$ ]]; then
 	echo "Runs must be an integer: $runs"
 	exit 1
 fi
+if [ "$runs" -le 0 ]; then
+	echo "Runs must be greater than zero: $runs"
+	exit 1
+fi
+runs_limit="$runs"
+readonly runs_limit
 
 if [ "$runs_set" -eq 1 ]; then
 	echo "Runs: $runs"
+fi
+
+if [ "$sleep_base_set" -eq 1 ]; then
+	if ! [[ "$sleep_base" =~ ^[0-9]+$ ]]; then
+		echo "Sleep seconds must be an integer: $sleep_base"
+		exit 1
+	fi
+	echo "Sleep base: $sleep_base"
 fi
 
 if [ "$node_count_set" -eq 1 ]; then
@@ -312,20 +336,22 @@ run() {
 	done
 	echo "Running $counter: NODE_COUNT=$node_count BATCH_SIZE=$batch_size"
 
+	local sleep_with_nodes
+	sleep_with_nodes="$(calc_sleep_with_nodes)"
 	curl -X POST "http://localhost:${server_port}/validators/register" -H "Content-Type: application/json"
-	sleep 3
+	sleep "$sleep_with_nodes"
 	curl -X POST "http://localhost:${server_port}/users/default/register" -H "Content-Type: application/json"
 	sleep 1
 	for ((bs = 0; bs < batch_size; bs++)); do
 		curl -X POST "http://localhost:${server_port}/users/default/burn" -H "Content-Type: application/json"
-		sleep 1
+		sleep "$sleep_base"
 	done
-	sleep 3
+	sleep "$sleep_with_nodes"
 	for ((bs = 0; bs < batch_size; bs++)); do
 		curl -X POST "http://localhost:${server_port}/users/default/withdraw" -H "Content-Type: application/json"
-		sleep 1
+		sleep "$sleep_base"
 	done
-	sleep 3
+	sleep "$sleep_with_nodes"
 	curl -X POST "http://localhost:${server_port}/validators/replace" -H "Content-Type: application/json" -d '{"node_id":0,"replace_with_account_id":1}'
 	curl -X POST "http://localhost:${server_port}/validators/exit" -H "Content-Type: application/json" -d '{"node_id":0}'
 	curl -X POST "http://localhost:${server_port}/validators/withdraw" -H "Content-Type: application/json" -d '{"node_id":0}'
@@ -347,6 +373,6 @@ fi
 node_count=$(awk -F= '/^NODE_COUNT=/{print $2}' "$env_file" | tail -n 1)
 batch_size=$(awk -F= '/^BATCH_SIZE=/{print $2}' "$env_file" | tail -n 1)
 
-for ((i = 1; i <= runs; i++)); do
+for ((i = 1; i <= runs_limit; i++)); do
 	run "$i"
 done

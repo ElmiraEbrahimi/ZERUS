@@ -91,12 +91,10 @@ The Go server requires a full set of environment variables. Use
 | Variable                 | Purpose                  |
 | ------------------------ | ------------------------ |
 | ZKSYNC_RPC_URL           | L2 HTTP RPC endpoint     |
-| L1_RPC_URL               | L1 HTTP RPC endpoint (local-setup: http://localhost:8545) |
 | ZKSYNC_CHAIN_ID          | L2 chain ID              |
 | ZKSYNC_PRIVATE_KEY       | deployer/signer key      |
 | HTTP_BIND_ADDR           | API bind address         |
 | COUNTER_CONTRACT_ADDRESS | Counter contract address |
-| L1_COUNTER_CONTRACT_ADDRESS | L1 Counter contract address |
 | ORACLE_CONTRACT_ADDRESS  | Oracle contract address  |
 
 The deploy targets update contract address fields inside `.env` automatically.
@@ -108,7 +106,6 @@ make up          # start local-setup
 make down        # stop and clear local-setup
 make up-deploy   # start local-setup + deploy contracts
 make deploy      # deploy all contracts and regenerate bindings
-make deploy-counter-l1 # deploy Counter to L1 and update .env
 make server      # run the Go API server
 ```
 
