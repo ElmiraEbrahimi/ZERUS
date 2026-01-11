@@ -26,7 +26,7 @@
 
 services:
   reth:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     restart: always
     image: "ghcr.io/paradigmxyz/reth:v0.2.0-beta.2"
     volumes:
@@ -69,7 +69,7 @@ services:
   # Master node - that will create the ZK Chain
   zksync:
     stdin_open: true
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     tty: true
     image: matterlabs/local-node:latest2.0_gateway
     healthcheck:
@@ -96,7 +96,7 @@ services:
       - LEGACY_BRIDGE_TESTING=1
 
   zksync_custombase:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     stdin_open: true
     tty: true
     image: matterlabs/local-node:latest2.0_gateway
@@ -132,7 +132,7 @@ services:
       - CUSTOM_TOKEN_ADDRESS=${CUSTOM_TOKEN_ADDRESS}
 
   data-fetcher_main:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-data-fetcher:latest"
     environment:
       - PORT=3040
@@ -142,7 +142,7 @@ services:
     restart: unless-stopped
 
   data-fetcher_custombase:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-data-fetcher:latest"
     environment:
       - PORT=3040
@@ -152,7 +152,7 @@ services:
     restart: unless-stopped
 
   worker_main:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-worker:latest"
     environment:
       - PORT=3001
@@ -168,7 +168,7 @@ services:
     restart: unless-stopped
 
   worker_custombase:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-worker:latest"
     environment:
       - PORT=3001
@@ -184,7 +184,7 @@ services:
     restart: unless-stopped
 
   api_main:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-api:latest"
     environment:
       - PORT=3020
@@ -199,7 +199,7 @@ services:
     restart: unless-stopped
 
   api_custombase:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-api:latest"
     environment:
       - PORT=3020
@@ -215,7 +215,7 @@ services:
 
 
   app:
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     image: "matterlabs/block-explorer-app:latest"
     volumes:
       # This is super hacky - we should have a better solution.
@@ -260,7 +260,7 @@ services:
     depends_on:
       - backend
     image: ghcr.io/blockscout/frontend:latest
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     restart: always
     env_file:
       -  blockscout/common-frontend.env
@@ -270,7 +270,7 @@ services:
     depends_on:
       - backend
     image: ghcr.io/blockscout/stats:latest
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     restart: always
     env_file:
       -  blockscout/common-stats.env
@@ -304,7 +304,7 @@ services:
 
   sig-provider:
     image: ghcr.io/blockscout/sig-provider:latest
-    platform: linux/amd64
+    platform: ${L2A_PLATFORM:-linux/amd64}
     restart: always
 
   

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
@@ -887,9 +886,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		p groth16.Proof
 	)
 
-	res, err := memtime.MeasurePeak(
+	_, err = memtime.MeasurePeak(
 		"groth16.Prove voting_batch",
-		5*time.Millisecond,
+		memtime.PeakSampleInterval,
 		func() error {
 			var e error
 			w, e = frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
@@ -905,23 +904,14 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("prove: %w", err)
 	}
 
-	provePeakMB := memtime.BytesToMB(res.PeakBytes)
-	proveTimeMS := int(res.Time.Milliseconds())
-
-	log.Printf(
-		"AGGREGATOR PROVE peak=%dMB time=%dms",
-		provePeakMB,
-		proveTimeMS,
-	)
-
 	pw, err := w.Public()
 	if err != nil {
 		return nil, fmt.Errorf("public witness: %w", err)
 	}
 
-	vres, err := memtime.MeasurePeak(
+	_, err = memtime.MeasurePeak(
 		"groth16.Verify voting_batch",
-		5*time.Millisecond,
+		memtime.PeakSampleInterval,
 		func() error {
 			return groth16.Verify(p, n.Oracle.SparseVK, pw)
 		},
@@ -929,15 +919,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	if err != nil {
 		return nil, fmt.Errorf("verify proof: %w", err)
 	}
-
-	verifyPeakMB := memtime.BytesToMB(vres.PeakBytes)
-	verifyTimeMS := int(vres.Time.Milliseconds())
-
-	log.Printf(
-		"AGGREGATOR VERIFY peak=%dMB time=%dms",
-		verifyPeakMB,
-		verifyTimeMS,
-	)
 
 	proof, err := util.ProofToEthereumProof(p)
 	if err != nil {

@@ -13,4 +13,4 @@ MerkleProofVerifier.sol
 VotingBatchVerifier.sol
 
 *.csv
-
+run_index

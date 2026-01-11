@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
@@ -521,9 +520,9 @@ func (u *User) WithdrawTx() (string, error) {
 		proof       groth16.Proof
 	)
 
-	pres, err := memtime.MeasurePeak(
+	_, err = memtime.MeasurePeak(
 		"groth16.Prove merkle_proof",
-		5*time.Millisecond,
+		memtime.PeakSampleInterval,
 		func() error {
 			var e error
 
@@ -540,18 +539,14 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("failed to prove (user=%v): %v", u.Name, err)
 	}
 
-	provePeakMB := memtime.BytesToMB(pres.PeakBytes)
-	proveTimeMS := int(pres.Time.Milliseconds())
-	log.Printf("USER PROVE peak=%dMB time=%dms", provePeakMB, proveTimeMS)
-
 	publicWitness, err := frontend.NewWitness(&witness, ecc.BN254.ScalarField(), frontend.PublicOnly())
 	if err != nil {
 		return "", fmt.Errorf("failed to create public witness (user=%v): %v", u.Name, err)
 	}
 
-	vres, err := memtime.MeasurePeak(
+	_, err = memtime.MeasurePeak(
 		"groth16.Verify merkle_proof",
-		5*time.Millisecond,
+		memtime.PeakSampleInterval,
 		func() error {
 			return groth16.Verify(proof, u.VK, publicWitness)
 		},
@@ -559,10 +554,6 @@ func (u *User) WithdrawTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to verify proof (user=%v): %v", u.Name, err)
 	}
-
-	verifyPeakMB := memtime.BytesToMB(vres.PeakBytes)
-	verifyTimeMS := int(vres.Time.Milliseconds())
-	log.Printf("USER VERIFY peak=%dMB time=%dms", verifyPeakMB, verifyTimeMS)
 
 	// send trx to claim:
 	log.Printf("claiming (user=%v)...", u.Name)

@@ -6,29 +6,85 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
+	"runtime/debug"
+	"runtime/metrics"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/shirou/gopsutil/process"
+
+	"l2alchemy/internal/runindex"
 )
 
 var (
-	memCSVHeader = []string{"datetime", "source", "time", "memory"}
+	memCSVHeader = []string{
+		"index",
+		"datetime",
+		"source",
+		"time",
+		"rss_mb",
+		"footprint_mb",
+		"heap_mb",
+		"go_total_mb",
+		"rss_delta_mb",
+		"footprint_delta_mb",
+		"heap_delta_mb",
+		"go_total_delta_mb",
+	}
 	memCSVMu     sync.Mutex
 	memCSVWriter *csv.Writer
 	memCSVFile   *os.File
+	memCSVIndex  int
 	memCSVPathMu sync.Mutex
 	memCSVPaths  map[string]string
+	rssProcOnce  sync.Once
+	rssProc      *process.Process
+	rssProcErr   error
 )
 
+var goMemMetricNames = []string{
+	"/memory/classes/heap/objects:bytes",
+	"/memory/classes/total:bytes",
+}
+
+var goMemSamplePool = sync.Pool{
+	New: func() any {
+		samples := make([]metrics.Sample, len(goMemMetricNames))
+		for i, name := range goMemMetricNames {
+			samples[i].Name = name
+		}
+		return samples
+	},
+}
+
+// PeakSampleInterval is the default sampling interval for peak memory tracking.
+const PeakSampleInterval = time.Millisecond
+
+type osMemSample struct {
+	rssBytes       uint64
+	rssOK          bool
+	footprintBytes uint64
+	footprintOK    bool
+	pssBytes       uint64
+	pssOK          bool
+	ussBytes       uint64
+	ussOK          bool
+}
+
+type goMemSample struct {
+	heapObjects uint64
+	total       uint64
+}
+
 type Sample struct {
-	source string
-	start  time.Time
-	before runtime.MemStats
+	source  string
+	start   time.Time
+	osBase  osMemSample
+	goBase  goMemSample
+	hasBase bool
 }
 
 func Start(source string) *Sample {
@@ -36,12 +92,15 @@ func Start(source string) *Sample {
 	if source == "" {
 		source = "unknown"
 	}
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
+	start := time.Now()
+	osSample, _ := osMemorySample()
+	goSample := readGoMemSample()
 	return &Sample{
-		source: source,
-		start:  time.Now(),
-		before: before,
+		source:  source,
+		start:   start,
+		osBase:  osSample,
+		goBase:  goSample,
+		hasBase: true,
 	}
 }
 
@@ -49,13 +108,15 @@ func (s *Sample) End() {
 	if s == nil {
 		return
 	}
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
-	usedBytes := uint64(0)
-	if after.TotalAlloc > s.before.TotalAlloc {
-		usedBytes = after.TotalAlloc - s.before.TotalAlloc
+	osSample, _ := osMemorySample()
+	goSample := readGoMemSample()
+	osBase := osMemSample{}
+	goBase := goMemSample{}
+	if s.hasBase {
+		osBase = s.osBase
+		goBase = s.goBase
 	}
-	logSample(s.start, s.source, time.Since(s.start), usedBytes)
+	logSample(s.start, s.source, time.Since(s.start), osSample, goSample, osBase, goBase)
 }
 
 // SetupMemTimeCSV configures CSV logging for memory/time samples.
@@ -74,6 +135,9 @@ func SetupMemTimeCSV(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	if err := runindex.EnsureCSVHeaderWithIndex(path, memCSVHeader); err != nil {
+		log.Printf("memtime csv: header update failed: %v", err)
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
@@ -83,6 +147,12 @@ func SetupMemTimeCSV(path string) (*os.File, error) {
 
 	memCSVWriter = csv.NewWriter(file)
 	memCSVFile = file
+	if idx, err := runindex.Current(path); err != nil {
+		log.Printf("memtime csv: index init failed: %v", err)
+		memCSVIndex = 0
+	} else {
+		memCSVIndex = idx
+	}
 	if statErr == nil && info.Size() == 0 {
 		if err := memCSVWriter.Write(memCSVHeader); err != nil {
 			log.Printf("memtime csv: header write failed: %v", err)
@@ -152,7 +222,7 @@ func ResolveMemTimeCSVPath(nodeCount, batchSize int) string {
 	return path
 }
 
-func logSample(start time.Time, source string, duration time.Duration, usedBytes uint64) {
+func logSample(start time.Time, source string, duration time.Duration, osSample osMemSample, goSample goMemSample, osBase osMemSample, goBase goMemSample) {
 	ensureWriter()
 
 	memCSVMu.Lock()
@@ -161,11 +231,22 @@ func logSample(start time.Time, source string, duration time.Duration, usedBytes
 		return
 	}
 
+	footprintBytes, footprintOK := combinedFootprintBytesOK(osSample)
+	baseFootprintBytes, baseFootprintOK := combinedFootprintBytesOK(osBase)
+
 	row := []string{
+		strconv.Itoa(memCSVIndex),
 		start.Format("20060102_150405"),
 		source,
 		fmt.Sprintf("%.6f", duration.Seconds()),
-		fmt.Sprintf("%.2f", float64(usedBytes)/(1024.0*1024.0)),
+		formatMB(osSample.rssBytes, osSample.rssOK),
+		formatMB(footprintBytes, footprintOK),
+		formatMB(goSample.heapObjects, true),
+		formatMB(goSample.total, true),
+		formatDeltaMB(osSample.rssBytes, osSample.rssOK, osBase.rssBytes, osBase.rssOK),
+		formatDeltaMB(footprintBytes, footprintOK, baseFootprintBytes, baseFootprintOK),
+		formatDeltaMB(goSample.heapObjects, true, goBase.heapObjects, true),
+		formatDeltaMB(goSample.total, true, goBase.total, true),
 	}
 
 	if err := memCSVWriter.Write(row); err != nil {
@@ -178,54 +259,168 @@ func logSample(start time.Time, source string, duration time.Duration, usedBytes
 	}
 }
 
+func formatMB(bytes uint64, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", float64(bytes)/(1024.0*1024.0))
+}
+
+func formatDeltaMB(bytes uint64, ok bool, baseBytes uint64, baseOK bool) string {
+	if !ok || !baseOK {
+		return ""
+	}
+	if bytes < baseBytes {
+		return "0.00"
+	}
+	return fmt.Sprintf("%.2f", float64(bytes-baseBytes)/(1024.0*1024.0))
+}
+
+func combinedFootprintBytesOK(osSample osMemSample) (uint64, bool) {
+	if osSample.footprintOK {
+		return osSample.footprintBytes, true
+	}
+	if osSample.pssOK {
+		return osSample.pssBytes, true
+	}
+	if osSample.ussOK {
+		return osSample.ussBytes, true
+	}
+	return 0, false
+}
+
+func osMemorySample() (osMemSample, error) {
+	sample, err := osFootprintBytes()
+	if sample.rssOK {
+		return sample, err
+	}
+	rss, rssErr := rssBytes()
+	if rssErr != nil {
+		if err == nil {
+			err = rssErr
+		}
+		return sample, err
+	}
+	sample.rssBytes = rss
+	sample.rssOK = true
+	return sample, err
+}
+
+func rssBytes() (uint64, error) {
+	rssProcOnce.Do(func() {
+		rssProc, rssProcErr = process.NewProcess(int32(os.Getpid()))
+	})
+	if rssProcErr != nil {
+		return 0, rssProcErr
+	}
+	info, err := rssProc.MemoryInfo()
+	if err != nil {
+		return 0, err
+	}
+	return info.RSS, nil
+}
+
+func readGoMemSample() goMemSample {
+	samples := goMemSamplePool.Get().([]metrics.Sample)
+	metrics.Read(samples)
+	out := goMemSample{
+		heapObjects: sampleUint64(samples[0].Value),
+		total:       sampleUint64(samples[1].Value),
+	}
+	goMemSamplePool.Put(samples)
+	return out
+}
+
+func sampleUint64(value metrics.Value) uint64 {
+	if value.Kind() != metrics.KindUint64 {
+		return 0
+	}
+	return value.Uint64()
+}
+
+func updatePeak(osPeak *osMemSample, goPeak *goMemSample, osSample osMemSample, goSample goMemSample) {
+	if osSample.rssOK && (!osPeak.rssOK || osSample.rssBytes > osPeak.rssBytes) {
+		osPeak.rssBytes = osSample.rssBytes
+		osPeak.rssOK = true
+	}
+	if osSample.footprintOK && (!osPeak.footprintOK || osSample.footprintBytes > osPeak.footprintBytes) {
+		osPeak.footprintBytes = osSample.footprintBytes
+		osPeak.footprintOK = true
+	}
+	if osSample.pssOK && (!osPeak.pssOK || osSample.pssBytes > osPeak.pssBytes) {
+		osPeak.pssBytes = osSample.pssBytes
+		osPeak.pssOK = true
+	}
+	if osSample.ussOK && (!osPeak.ussOK || osSample.ussBytes > osPeak.ussBytes) {
+		osPeak.ussBytes = osSample.ussBytes
+		osPeak.ussOK = true
+	}
+	if goSample.heapObjects > goPeak.heapObjects {
+		goPeak.heapObjects = goSample.heapObjects
+	}
+	if goSample.total > goPeak.total {
+		goPeak.total = goSample.total
+	}
+}
+
+func peakBytes(osSample osMemSample, goSample goMemSample) uint64 {
+	if osSample.rssOK {
+		return osSample.rssBytes
+	}
+	if value, ok := combinedFootprintBytesOK(osSample); ok {
+		return value
+	}
+	if goSample.total != 0 {
+		return goSample.total
+	}
+	return goSample.heapObjects
+}
+
 // PeakResult is the result of a peak-memory measurement.
 type PeakResult struct {
 	PeakBytes uint64
 	Time      time.Duration
 }
 
-// MeasurePeak samples runtime.MemStats.Alloc while fn is running.
-// It returns (peakAllocDuringFn - baselineAllocBeforeFn).
+// MeasurePeak samples OS footprint and Go runtime memory classes while fn is running.
+// It returns the peak RSS bytes when available, otherwise footprint or Go runtime total bytes.
 func MeasurePeak(source string, interval time.Duration, fn func() error) (PeakResult, error) {
 	if interval <= 0 {
-		interval = 5 * time.Millisecond
+		interval = PeakSampleInterval
 	}
 	source = strings.TrimSpace(source)
 	if source == "" {
 		source = "unknown"
 	}
 
-	// Reduce noise
-	runtime.GC()
+	osSample, _ := osMemorySample()
+	goSample := readGoMemSample()
 
-	var base runtime.MemStats
-	runtime.ReadMemStats(&base)
+	osBase := osSample
+	goBase := goSample
 
-	var peak uint64
-	peak = base.Alloc
+	osPeak := osSample
+	goPeak := goSample
+	var peakMu sync.Mutex
 
 	start := time.Now()
 	done := make(chan struct{})
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	// sampler
 	go func() {
+		defer wg.Done()
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				var ms runtime.MemStats
-				runtime.ReadMemStats(&ms)
-				// update peak
-				for {
-					old := atomic.LoadUint64(&peak)
-					if ms.Alloc <= old {
-						break
-					}
-					if atomic.CompareAndSwapUint64(&peak, old, ms.Alloc) {
-						break
-					}
-				}
+				osSample, _ := osMemorySample()
+				goSample := readGoMemSample()
+				peakMu.Lock()
+				updatePeak(&osPeak, &goPeak, osSample, goSample)
+				peakMu.Unlock()
 			case <-done:
 				return
 			}
@@ -234,19 +429,42 @@ func MeasurePeak(source string, interval time.Duration, fn func() error) (PeakRe
 
 	err := fn()
 	close(done)
+	wg.Wait()
+
+	osSample, _ = osMemorySample()
+	goSample = readGoMemSample()
+	peakMu.Lock()
+	updatePeak(&osPeak, &goPeak, osSample, goSample)
+	finalOS := osPeak
+	finalGo := goPeak
+	finalKey := peakBytes(finalOS, finalGo)
+	peakMu.Unlock()
 
 	elapsed := time.Since(start)
-	p := atomic.LoadUint64(&peak)
 
-	used := uint64(0)
-	if p > base.Alloc {
-		used = p - base.Alloc
+	logSample(start, source+" (PEAK)", elapsed, finalOS, finalGo, osBase, goBase)
+	if shouldIsolatePeak() {
+		debug.FreeOSMemory()
 	}
 
-	// Log peak as MB to your CSV (same CSV system you already have)
-	logSample(start, source+" (PEAK)", elapsed, used)
+	return PeakResult{PeakBytes: finalKey, Time: elapsed}, err
+}
 
-	return PeakResult{PeakBytes: used, Time: elapsed}, err
+func shouldIsolatePeak() bool {
+	val, ok := os.LookupEnv("MEMTIME_ISOLATE")
+	if ok {
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		}
+	}
+
+	memCSVMu.Lock()
+	enabled := memCSVWriter != nil
+	memCSVMu.Unlock()
+	return enabled
 }
 
 func BytesToMB(b uint64) int {

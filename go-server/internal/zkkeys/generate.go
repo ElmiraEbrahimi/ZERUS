@@ -2,9 +2,10 @@ package zkkeys
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strconv"
-	"time"
 
 	"l2alchemy/circuits/merkle_proof"
 	"l2alchemy/circuits/voting_batch"
@@ -32,6 +33,7 @@ func SupportedCircuits() []CircuitName {
 // GenerateKeysToFiles compiles the circuit and runs Groth16 Setup, writing pk/vk to pkPath and vkPath.
 // It returns the compiled constraint system, keys, and a coarse estimate of memory usage (MB) and elapsed time (ms).
 // If force is false and both pk/vk files exist, it skips setup and loads the keys from disk.
+// If an r1cs cache exists alongside the keys, it is reused to avoid recompiling.
 func GenerateKeysToFiles(
 	c CircuitName,
 	pkPath, vkPath string,
@@ -46,22 +48,18 @@ func GenerateKeysToFiles(
 ) {
 
 	// -------------------------------
-	// 1) Build circuit
+	// 1) Resolve circuit builder
 	// -------------------------------
-	var circuit frontend.Circuit
+	var buildCircuit func() (frontend.Circuit, error)
 	switch c {
 	case CircuitMerkleProof:
-		mc, err := merkleCircuitFromEnv()
-		if err != nil {
-			return nil, nil, nil, 0, 0, 0, 0, err
+		buildCircuit = func() (frontend.Circuit, error) {
+			return merkleCircuitFromEnv()
 		}
-		circuit = mc
 	case CircuitVotingBatch:
-		vc, err := votingBatchCircuitFromEnv()
-		if err != nil {
-			return nil, nil, nil, 0, 0, 0, 0, err
+		buildCircuit = func() (frontend.Circuit, error) {
+			return votingBatchCircuitFromEnv()
 		}
-		circuit = vc
 	default:
 		return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("unknown circuit: %s", c)
 	}
@@ -69,26 +67,47 @@ func GenerateKeysToFiles(
 	// -------------------------------
 	// 2) COMPILE — PEAK MEMORY
 	// -------------------------------
+	r1csPath := r1csPathFromPK(pkPath)
 	var cs constraint.ConstraintSystem
-	compileRes, err := memtime.MeasurePeak(
-		fmt.Sprintf("frontend.Compile %s", c),
-		5*time.Millisecond,
-		func() error {
-			var e error
-			cs, e = frontend.Compile(
-				ecc.BN254.ScalarField(),
-				r1cs.NewBuilder,
-				circuit,
-			)
-			return e
-		},
-	)
-	if err != nil {
-		return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("compile %s: %w", c, err)
+	compilePeakMB := 0
+	compileTimeMS := 0
+
+	if !force {
+		cached, err := readR1CS(r1csPath)
+		if err == nil {
+			cs = cached
+		}
 	}
 
-	compilePeakMB := memtime.BytesToMB(compileRes.PeakBytes)
-	compileTimeMS := int(compileRes.Time.Milliseconds())
+	if cs == nil {
+		circuit, err := buildCircuit()
+		if err != nil {
+			return nil, nil, nil, 0, 0, 0, 0, err
+		}
+		compileRes, err := memtime.MeasurePeak(
+			fmt.Sprintf("frontend.Compile %s", c),
+			memtime.PeakSampleInterval,
+			func() error {
+				var e error
+				cs, e = frontend.Compile(
+					ecc.BN254.ScalarField(),
+					r1cs.NewBuilder,
+					circuit,
+				)
+				return e
+			},
+		)
+		if err != nil {
+			return nil, nil, nil, 0, 0, 0, 0, fmt.Errorf("compile %s: %w", c, err)
+		}
+
+		if err := writeR1CSAtomic(r1csPath, cs); err != nil {
+			log.Printf("zkkeys: write r1cs %s: %v", r1csPath, err)
+		}
+
+		compilePeakMB = memtime.BytesToMB(compileRes.PeakBytes)
+		compileTimeMS = int(compileRes.Time.Milliseconds())
+	}
 
 	// -------------------------------
 	// 3) LOAD KEYS IF EXIST (NO SETUP)
@@ -118,7 +137,7 @@ func GenerateKeysToFiles(
 
 	setupRes, err := memtime.MeasurePeak(
 		fmt.Sprintf("groth16.Setup %s", c),
-		5*time.Millisecond,
+		memtime.PeakSampleInterval,
 		func() error {
 			var e error
 			pk, vk, e = groth16.Setup(cs)
@@ -156,7 +175,7 @@ func GenerateKeysToFiles(
 }
 
 // -----------------------------------------------------------------------------
-// Helpers (unchanged except removing mem accounting)
+// Helpers
 // -----------------------------------------------------------------------------
 
 func fileExists(path string) bool {
@@ -198,6 +217,54 @@ func writeKeyAtomic(path string, writeFn func(*os.File) error) error {
 		return err
 	}
 	if err := writeFn(f); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func r1csPathFromPK(pkPath string) string {
+	return filepath.Join(filepath.Dir(pkPath), "r1cs")
+}
+
+func readR1CS(path string) (cs constraint.ConstraintSystem, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cs = nil
+			err = fmt.Errorf("read r1cs %s: panic: %v", path, r)
+		}
+	}()
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	cs = groth16.NewCS(ecc.BN254)
+	if _, err := cs.ReadFrom(f); err != nil {
+		return nil, err
+	}
+	return cs, nil
+}
+
+func writeR1CSAtomic(path string, cs constraint.ConstraintSystem) error {
+	tmp := path + ".tmp"
+	_ = os.Remove(tmp)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := cs.WriteTo(f); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err

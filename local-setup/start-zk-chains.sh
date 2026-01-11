@@ -8,6 +8,24 @@
 INSTANCE_TYPE=${1:-latest2.0}
 export INSTANCE_TYPE=$INSTANCE_TYPE
 
+detect_platform() {
+  case "$(uname -m)" in
+    x86_64|amd64)
+      echo "linux/amd64"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+if [ -z "${L2A_PLATFORM:-}" ]; then
+  L2A_PLATFORM=$(detect_platform)
+  if [ -n "$L2A_PLATFORM" ]; then
+    export L2A_PLATFORM
+  fi
+fi
+
 # Fetch the latest images and start all services
 docker compose -f zk-chains-docker-compose.yml pull
 docker compose -f zk-chains-docker-compose.yml up -d zksync

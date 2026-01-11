@@ -16,13 +16,16 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/core/types"
+
+	"l2alchemy/internal/runindex"
 )
 
 var (
-	txCSVHeader = []string{"datetime", "source", "gas_used", "receipt_json"}
+	txCSVHeader = []string{"index", "datetime", "source", "gas_used", "receipt_json"}
 	txCSVMu     sync.Mutex
 	txCSVWriter *csv.Writer
 	txCSVFile   *os.File
+	txCSVIndex  int
 )
 
 // SetupTxReceiptCSV configures CSV logging for transaction receipts.
@@ -39,6 +42,9 @@ func SetupTxReceiptCSV(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	if err := runindex.EnsureCSVHeaderWithIndex(path, txCSVHeader); err != nil {
+		log.Printf("tx receipt csv: header update failed: %v", err)
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
@@ -48,6 +54,12 @@ func SetupTxReceiptCSV(path string) (*os.File, error) {
 
 	txCSVWriter = csv.NewWriter(file)
 	txCSVFile = file
+	if idx, err := runindex.Current(path); err != nil {
+		log.Printf("tx receipt csv: index init failed: %v", err)
+		txCSVIndex = 0
+	} else {
+		txCSVIndex = idx
+	}
 	if statErr == nil && info.Size() == 0 {
 		if err := txCSVWriter.Write(txCSVHeader); err != nil {
 			log.Printf("tx receipt csv: header write failed: %v", err)
@@ -167,6 +179,7 @@ func writeTxReceiptCSV(label string, receipt *types.Receipt) {
 	}
 
 	row := []string{
+		strconv.Itoa(txCSVIndex),
 		time.Now().Format("20060102_150405"),
 		label,
 		strconv.FormatUint(receipt.GasUsed, 10),

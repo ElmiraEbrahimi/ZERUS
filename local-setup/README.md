@@ -8,6 +8,10 @@ By default, it doesn't use any docker volumes, so all the data is lost when dock
 
 To run zkSync locally, you must have `docker compose` and `Docker` installed on your machine. 
 
+## Platform selection
+
+The start scripts set `L2A_PLATFORM` only on x86_64 hosts (to `linux/amd64`). On other architectures, the existing `platform` values in the compose files remain unchanged. If you run `docker compose` directly and want the x86_64 override, set `L2A_PLATFORM=linux/amd64`.
+
 ## Usage
 
 To bootstrap zkSync locally, just run:
@@ -98,4 +102,3 @@ To reset the zkSync state, just run:
 ```shell
 ./clear-zk-chains.sh
 ```
-

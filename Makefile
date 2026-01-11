@@ -2,9 +2,18 @@
 server:
 	cd go-server && go run ./cmd/server
 
+.PHONY: run-index
+run-index:
+	cd go-server && go run ./cmd/runindex
+
 .PHONY: zksync
 zksync:
 	@echo "Starting zkSync local stack via start.sh..."
+	@cd local-setup && chmod +x ./start.sh && ./start.sh
+
+.PHONY: l1
+l1:
+	@echo "Starting local L1 node via start.sh..."
 	@cd local-setup && chmod +x ./start.sh && ./start.sh
 
 .PHONY: up-deploy
@@ -21,7 +30,7 @@ down:
 	cd local-setup && ./clear.sh
 
 .PHONY: deploy
-deploy: deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle
+deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle
 
 .PHONY: deploy-counter
 deploy-counter:

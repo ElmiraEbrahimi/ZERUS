@@ -3,7 +3,6 @@ package zkkeys
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -159,13 +158,6 @@ func (m *Manager) Generate(c CircuitName) (KeyGenResult, error) {
 	if err != nil {
 		return KeyGenResult{}, err
 	}
-
-	log.Printf(
-		"generated keys for %s | compile: %dMB %dms | setup: %dMB %dms",
-		c,
-		compilePeakMB, compileTimeMS,
-		setupPeakMB, setupTimeMS,
-	)
 
 	return KeyGenResult{
 		Circuit:   c,
