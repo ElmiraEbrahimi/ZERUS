@@ -32,7 +32,7 @@ down:
 .PHONY: deploy
 deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle
 
-.PHONY: deploy-counter
+.PHONY: deploy-counter deploy-counter-l1
 deploy-counter:
 	@echo "Deploying Counter via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
@@ -55,6 +55,39 @@ deploy-counter:
 		echo "COUNTER_CONTRACT_ADDRESS=$$addr" > .env; \
 	fi; \
 	  echo "Updated .env with COUNTER_CONTRACT_ADDRESS=$$addr"
+
+	@echo "Generating Go bindings via abigen..."
+	@cd contracts && forge build --extra-output-files abi >/dev/null
+	@abigen \
+	  --abi contracts/out/Counter.sol/Counter.abi.json \
+	  --pkg eth \
+	  --type Counter \
+	  --out go-server/internal/eth/counter_abigen.go
+	@echo "Regenerated go-server/internal/eth/counter_abigen.go"
+	@echo "Deployment + ABI regeneration complete."
+
+deploy-counter-l1:
+	@echo "Deploying Counter to L1 via forge..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	  forge script script/DeployCounter.s.sol --rpc-url "$$L1_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --broadcast \
+	    2>&1 | tee /tmp/forge_deploy_l1.log
+
+	@addr=$$(awk '/Counter deployed at/ {print $$4}' /tmp/forge_deploy_l1.log | tail -n1); \
+	if [ -z "$$addr" ]; then \
+		echo "ERROR: deployment succeeded but could not extract Counter address from forge output" >&2; \
+		exit 1; \
+	fi; \
+	  echo "Detected L1 Counter contract address: $$addr"; \
+	if [ -f .env ]; then \
+		awk -v addr="$$addr" 'BEGIN{updated=0} \
+		/^L1_COUNTER_CONTRACT_ADDRESS=/{print "L1_COUNTER_CONTRACT_ADDRESS=" addr; updated=1; next} \
+		{print} \
+		END{if(!updated) print "L1_COUNTER_CONTRACT_ADDRESS=" addr}' .env > .env.tmp && mv .env.tmp .env; \
+	else \
+		echo "L1_COUNTER_CONTRACT_ADDRESS=$$addr" > .env; \
+	fi; \
+	  echo "Updated .env with L1_COUNTER_CONTRACT_ADDRESS=$$addr"
 
 	@echo "Generating Go bindings via abigen..."
 	@cd contracts && forge build --extra-output-files abi >/dev/null

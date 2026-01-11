@@ -5,7 +5,7 @@ import "forge-std/Script.sol";
 import "../src/Counter.sol";
 
 /// @title DeployCounter
-/// @notice A Foundry script that deploys the Counter contract to a configured zkSync L2.
+/// @notice A Foundry script that deploys the Counter contract to the configured chain (L1 or L2).
 /// It reads the deployer's private key from the `ZKSYNC_PRIVATE_KEY` environment
 /// variable and broadcasts the transaction to the network specified by the Foundry
 /// configuration. After deployment the script logs the address of the new contract.
