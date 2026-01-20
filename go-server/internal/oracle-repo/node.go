@@ -454,10 +454,13 @@ func (n *Node) AggregatorSelectVote(commitmentHashStr string) (*IncVote, error) 
 	for _, incVote := range commitmentHashVotes {
 		incTreeIndexAndRootHash := fmt.Sprintf("%v-%v", incVote.IncTreeIndex, string(incVote.RootHash))
 		selection[incTreeIndexAndRootHash] += 1
-		if selection[incTreeIndexAndRootHash] > len(n.Oracle.Nodes)/2 {
+		nValidators := len(n.Oracle.Nodes)
+		threshold := bftThreshold(nValidators)
+		if selection[incTreeIndexAndRootHash] >= threshold {
 			selectedIncVote = incVote
 			break
 		}
+
 	}
 
 	return selectedIncVote, nil
@@ -495,10 +498,14 @@ func (n *Node) AggregatorSelectWiVote(uniqueReqID string) (isApproved *big.Int, 
 	for _, wiVote := range n.WiVotes[uniqueReqID] {
 		if wiVote.IsApproved.Uint64() == 1 {
 			approvedCount++
-			if approvedCount > n.cfg.NodeCount/2 {
+			nValidators := n.cfg.NodeCount
+			threshold := bftThreshold(nValidators)
+
+			if approvedCount >= threshold {
 				isApproved = big.NewInt(1)
 				break
 			}
+
 		}
 	}
 
@@ -624,9 +631,13 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 			majorityCount = count
 		}
 	}
-	if majorityCount <= n.cfg.NodeCount/2 {
-		return nil, fmt.Errorf("no vote mask majority: max=%d threshold=%d", majorityCount, n.cfg.NodeCount/2)
+	nValidators := n.cfg.NodeCount
+	threshold := bftThreshold(nValidators)
+
+	if majorityCount < threshold {
+		return nil, fmt.Errorf("no BFT quorum for vote mask: max=%d threshold=%d", majorityCount, threshold)
 	}
+
 
 	hfunc := hash.MIMC_BN254.New()
 	hfunc.Reset()
@@ -831,7 +842,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 				big.NewInt(votingbatch.RewardValidator),
 			)
 		} else {
-			// dishonest validator → SLASH
 			penalty := big.NewInt(votingbatch.PenaltyValidator)
 			if validatorAccount.Balance.Cmp(penalty) <= 0 {
 				validatorAccount.Balance.SetInt64(0)
@@ -1552,4 +1562,11 @@ func check(name string, val *big.Int) {
 	} else {
 		fmt.Printf("✅ %s is within scalar field\n  → value: %s\n", name, val.String())
 	}
+}
+func bftThreshold(nValidators int) int {
+	if nValidators <= 0 {
+		return 0
+	}
+	f := (nValidators - 1) / 3
+	return 2*f + 1
 }

@@ -215,7 +215,6 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// isHonest = 1 if diff == 0, else 0
 		isHonest := api.IsZero(diff)  // 1 if diff==0 else 0
 		api.AssertIsBoolean(isHonest) // safety
-		// ////////////////////////////////////////////////////////////////
 		// honest gets +RewardValidator
 		rewardedBalance := api.Add(validator.Balance, RewardValidator)
 
@@ -256,15 +255,14 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// set honest bit if isHonest==1
 		honestBits = api.Add(honestBits, api.Mul(isHonest, bitMask))
 	}
+	// BFT quorum: threshold = 2*floor((n-1)/3) + 1
+	n := len(c.Validators)
+	f := (n - 1) / 3
+	threshold := frontend.Variable(2*f + 1)
 
-	// Compute real majority: isOneMajority = 1 if count1 > count0, else 0
-	threshold := frontend.Variable(len(c.Validators) / 2)
-
-	// cmp = 1 if majorityCount > threshold
-	cmp := api.Cmp(majorityCount, threshold)
-
-	// MUST be strictly greater
-	api.AssertIsEqual(cmp, 1)
+	// require majorityCount >= threshold
+	cmp := api.Cmp(majorityCount, threshold) // -1 if <, 0 if ==, 1 if >
+	api.AssertIsDifferent(cmp, -1)
 
 	api.Println("[batching_out] ValidatorBits:", c.ValidatorBits)
 	api.Println(" [batching_circuit] ValidatorBits (bitmask):", validatorBits)
