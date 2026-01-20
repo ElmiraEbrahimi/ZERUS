@@ -66,6 +66,22 @@ func main() {
 		log.Fatalf("failed to initialize counter client: %v", err)
 	}
 
+	var l1MessengerClient *eth.L1MessengerClient
+	if cfg.L1RPCURL != "" && cfg.L1MessengerContractAddress != "" {
+		l1MessengerClient, err = eth.NewL1MessengerClient(ctx, cfg.L1RPCURL, cfg.L1ChainID, cfg.PrivateKey, cfg.L1MessengerContractAddress, cfg.L1GasPriceWei)
+		if err != nil {
+			log.Printf("messaging: L1 messenger client disabled: %v", err)
+		}
+	}
+
+	var l2MessengerClient *eth.L2MessengerClient
+	if cfg.RPCURL != "" && cfg.L2MessengerContractAddress != "" {
+		l2MessengerClient, err = eth.NewL2MessengerClient(ctx, cfg.RPCURL, cfg.ChainID, cfg.PrivateKey, cfg.L2MessengerContractAddress)
+		if err != nil {
+			log.Printf("messaging: L2 messenger client disabled: %v", err)
+		}
+	}
+
 	keyDir := resolveKeyDir()
 	zkMgr := zkkeys.New(keyDir)
 	engine, err := oracle_runtime.Init(cfg, keyDir)
@@ -86,7 +102,11 @@ func main() {
 	counterHandler := handlers.NewCounterHandler(counterClient)
 	zkHandler := handlers.NewZKHandler(zkMgr)
 	oracleHandler := handlers.NewOracleHandler(engine)
-	mux := servers.NewRouter(counterHandler, zkHandler, oracleHandler)
+	var messengerHandler *handlers.MessengerHandler
+	if l1MessengerClient != nil || l2MessengerClient != nil {
+		messengerHandler = handlers.NewMessengerHandler(l1MessengerClient, l2MessengerClient, uint64(cfg.ChainID), cfg.L1UseDirectMessaging)
+	}
+	mux := servers.NewRouter(counterHandler, zkHandler, oracleHandler, messengerHandler)
 	rootHandler := servers.WithRequestLogging(mux)
 
 	srv := &http.Server{

@@ -25,7 +25,7 @@ type counterResponse struct {
 	Value string `json:"value"`
 }
 
-// txResponse is the shape of responses returned from POST /counter/increment.
+// txResponse is the shape of responses returned from transaction endpoints.
 type txResponse struct {
 	TxHash string `json:"tx_hash"`
 }

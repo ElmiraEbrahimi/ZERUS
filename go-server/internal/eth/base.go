@@ -17,6 +17,8 @@ type ChainClient struct {
 	ChainID *big.Int
 	PrivKey *ecdsa.PrivateKey
 	From    common.Address
+	// Optional override for tx gas price (useful for local L1).
+	GasPriceOverride *big.Int
 }
 
 func NewChainClient(ctx context.Context, rpcURL string, chainID int64, privKeyHex string) (*ChainClient, error) {
@@ -40,11 +42,19 @@ func NewChainClient(ctx context.Context, rpcURL string, chainID int64, privKeyHe
 		return nil, fmt.Errorf("dial rpc: %w", err)
 	}
 
+	chain := big.NewInt(chainID)
+	if chainID == 0 {
+		chain, err = cli.ChainID(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("resolve chain id: %w", err)
+		}
+	}
+
 	from := crypto.PubkeyToAddress(privKey.PublicKey)
 
 	return &ChainClient{
 		Eth:     cli,
-		ChainID: big.NewInt(chainID),
+		ChainID: chain,
 		PrivKey: privKey,
 		From:    from,
 	}, nil

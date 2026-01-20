@@ -9,15 +9,15 @@ import (
 // NewRouter constructs a new http.ServeMux and registers all routes using the
 // provided handlers. This helper is useful in tests and when embedding the
 // router in a custom HTTP server.
-func NewRouter(counter *handlers.CounterHandler, zk *handlers.ZKHandler, oracle *handlers.OracleHandler) *http.ServeMux {
+func NewRouter(counter *handlers.CounterHandler, zk *handlers.ZKHandler, oracle *handlers.OracleHandler, messaging *handlers.MessengerHandler) *http.ServeMux {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, counter, zk, oracle)
+	RegisterRoutes(mux, counter, zk, oracle, messaging)
 	return mux
 }
 
 // RegisterRoutes binds HTTP paths to handler methods. It can be called from
 // main() to configure the default ServeMux.
-func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *handlers.ZKHandler, oracle *handlers.OracleHandler) {
+func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *handlers.ZKHandler, oracle *handlers.OracleHandler, messaging *handlers.MessengerHandler) {
 	if counter != nil {
 		mux.HandleFunc("/counter", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet {
@@ -136,6 +136,56 @@ func RegisterRoutes(mux *http.ServeMux, counter *handlers.CounterHandler, zk *ha
 				return
 			}
 			oracle.WithdrawValidatorAccount(w, r)
+		})
+	}
+
+	if messaging != nil {
+		mux.HandleFunc("/messaging/l2/send", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.SendL2ToL1(w, r)
+		})
+
+		mux.HandleFunc("/messaging/l2/last-from-l1", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.GetL2LastFromL1(w, r)
+		})
+
+		mux.HandleFunc("/messaging/l1/send", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.SendL1ToL2(w, r)
+		})
+
+		mux.HandleFunc("/messaging/l1/send-direct", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.SendL1ToL2Direct(w, r)
+		})
+
+		mux.HandleFunc("/messaging/l1/receive", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.ReceiveFromL2(w, r)
+		})
+
+		mux.HandleFunc("/messaging/l1/last-from-l2", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			messaging.GetL1LastFromL2(w, r)
 		})
 	}
 }

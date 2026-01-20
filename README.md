@@ -88,14 +88,21 @@ Set `ZKSYNC_RPC_URL` and `ZKSYNC_CHAIN_ID` accordingly if you use this mode
 The Go server requires a full set of environment variables. Use
 `.env.example` as the source of truth. The most commonly edited values are:
 
-| Variable                 | Purpose                  |
-| ------------------------ | ------------------------ |
-| ZKSYNC_RPC_URL           | L2 HTTP RPC endpoint     |
-| ZKSYNC_CHAIN_ID          | L2 chain ID              |
-| ZKSYNC_PRIVATE_KEY       | deployer/signer key      |
-| HTTP_BIND_ADDR           | API bind address         |
-| COUNTER_CONTRACT_ADDRESS | Counter contract address |
-| ORACLE_CONTRACT_ADDRESS  | Oracle contract address  |
+| Variable                      | Purpose                                                   |
+| ----------------------------- | --------------------------------------------------------- |
+| ZKSYNC_RPC_URL                | L2 HTTP RPC endpoint                                      |
+| L1_RPC_URL                    | L1 HTTP RPC endpoint (local-setup: http://localhost:8545) |
+| L1_CHAIN_ID                   | L1 chain ID (0 = auto-detect from RPC)                    |
+| L1_GAS_PRICE_WEI              | L1 gas price override for deployments and L1->L2 base cost |
+| L1_MAILBOX_ADDRESS            | zkSync L1 mailbox / bridgehub address                     |
+| L1_USE_DIRECT_MESSAGING       | Use bridgehub direct L1->L2 flow by default               |
+| ZKSYNC_CHAIN_ID               | L2 chain ID                                               |
+| ZKSYNC_PRIVATE_KEY            | deployer/signer key                                       |
+| HTTP_BIND_ADDR                | API bind address                                          |
+| COUNTER_CONTRACT_ADDRESS      | Counter contract address                                  |
+| L1_MESSENGER_CONTRACT_ADDRESS | L1 messenger demo contract address                        |
+| L2_MESSENGER_CONTRACT_ADDRESS | L2 messenger demo contract address                        |
+| ORACLE_CONTRACT_ADDRESS       | Oracle contract address                                   |
 
 The deploy targets update contract address fields inside `.env` automatically.
 
@@ -105,8 +112,79 @@ The deploy targets update contract address fields inside `.env` automatically.
 make up          # start local-setup
 make down        # stop and clear local-setup
 make up-deploy   # start local-setup + deploy contracts
-make deploy      # deploy all contracts and regenerate bindings
+make deploy      # deploy core L2 contracts + L1/L2 messenger demo (requires L1_MAILBOX_ADDRESS)
+make deploy-messengers # deploy L2 + L1 messenger demo and link them
+make configure-l2-messenger # set L1 messenger on L2 (if needed)
 make server      # run the Go API server
+```
+
+## L1/L2 Messaging Demo
+
+Set `L1_MAILBOX_ADDRESS` to your zkSync L1 mailbox/bridgehub contract before deploying.
+`make deploy`/`make deploy-messengers` will auto-populate it from `ZKSYNC_RPC_URL` if it is empty.
+Set `L1_USE_DIRECT_MESSAGING=true` for bridgehub-based networks. The deploy script auto-sets it based on RPC capabilities.
+Then run `make deploy-messengers` and use `sendToL2` / `sendToL1` on the deployed contracts.
+
+### Messaging API (quick curl)
+
+Set a base URL once:
+
+```sh
+BASE_URL=http://localhost:18000
+```
+
+L1 -> L2 (send + read on L2):
+
+```sh
+curl -X POST "$BASE_URL/messaging/l1/send" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"ping from L1","l2_gas_limit":2000000,"l2_gas_per_pubdata":800,"value_wei":"0"}'
+
+curl "$BASE_URL/messaging/l2/last-from-l1"
+```
+
+L2 -> L1 (send + read on L1):
+
+```sh
+curl -X POST "$BASE_URL/messaging/l2/send" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"ping from L2"}'
+
+# Wait a few seconds for the relay to finalize on L1.
+curl "$BASE_URL/messaging/l1/last-from-l2"
+```
+
+### Messaging API (curl examples)
+
+L1 -> L2 (single-chain mode):
+If `value_wei` is empty or `0`, the server estimates the L1 base fee automatically.
+```sh
+curl -X POST http://localhost:18000/messaging/l1/send \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello from L1","l2_gas_limit":2000000,"l2_gas_per_pubdata":800,"value_wei":"0"}'
+
+curl http://localhost:18000/messaging/l2/last-from-l1
+```
+
+<!-- L1 -> L2 (zk-chains mode, explicit L2 chain id):
+```sh
+curl -X POST http://localhost:18000/messaging/l1/send-direct \
+  -H "Content-Type: application/json" \
+  -d '{"l2_chain_id":271,"message":"hello from L1","l2_gas_limit":2000000,"l2_gas_per_pubdata":800,"value_wei":"0"}'
+``` -->
+
+L2 -> L1 (requires zkSync proof from L2 RPC):
+```sh
+curl -X POST http://localhost:18000/messaging/l2/send \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello from L2"}'
+
+# After you fetch the proof (e.g. via zks_getL2ToL1MsgProof), call:
+# curl -X POST http://localhost:18000/messaging/l1/receive \
+#   -H "Content-Type: application/json" \
+#   -d '{"message":"hello from L2","l2_block_number":123,"l2_log_index":0,"l2_tx_number_in_block":1,"proof":["0x..."]}'
+
+curl http://localhost:18000/messaging/l1/last-from-l2
 ```
 
 ## Workflow
@@ -132,21 +210,21 @@ curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: applic
 
 ## API Endpoints
 
-| Method | Path                    | Example                                                                                          |
-| ------ | ----------------------- | ------------------------------------------------------------------------------------------------ |
-| GET    | /counter                | `curl http://localhost:18000/counter`                                                            |
-| POST   | /counter/increment      | `curl -X POST http://localhost:18000/counter/increment`                                          |
-| GET    | /health                 | `curl http://localhost:18000/health`                                                             |
-| POST   | /circuits/keygen        | `curl -X POST http://localhost:18000/circuits/keygen -H "Content-Type: application/json"`        |
-| GET    | /circuits/keys          | `curl http://localhost:18000/circuits/keys`                                                      |
-| POST   | /users/default/register | `curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json"` |
-| GET    | /users/default/balance  | `curl http://localhost:18000/users/default/balance`                                              |
-| POST   | /users/default/burn     | `curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"`     |
-| POST   | /users/default/withdraw | `curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"` |
-| POST   | /validators/register    | `curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"`    |
+| Method | Path                    | Example                                                                                                                                     |
+| ------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /counter                | `curl http://localhost:18000/counter`                                                                                                       |
+| POST   | /counter/increment      | `curl -X POST http://localhost:18000/counter/increment`                                                                                     |
+| GET    | /health                 | `curl http://localhost:18000/health`                                                                                                        |
+| POST   | /circuits/keygen        | `curl -X POST http://localhost:18000/circuits/keygen -H "Content-Type: application/json"`                                                   |
+| GET    | /circuits/keys          | `curl http://localhost:18000/circuits/keys`                                                                                                 |
+| POST   | /users/default/register | `curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json"`                                            |
+| GET    | /users/default/balance  | `curl http://localhost:18000/users/default/balance`                                                                                         |
+| POST   | /users/default/burn     | `curl -X POST http://localhost:18000/users/default/burn -H "Content-Type: application/json"`                                                |
+| POST   | /users/default/withdraw | `curl -X POST http://localhost:18000/users/default/withdraw -H "Content-Type: application/json"`                                            |
+| POST   | /validators/register    | `curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"`                                               |
 | POST   | /validators/replace     | `curl -X POST http://localhost:18000/validators/replace -H "Content-Type: application/json" -d '{"node_id":0,"replace_with_account_id":1}'` |
-| POST   | /validators/exit        | `curl -X POST http://localhost:18000/validators/exit -H "Content-Type: application/json" -d '{"node_id":0}'` |
-| POST   | /validators/withdraw    | `curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: application/json" -d '{"node_id":0}'` |
+| POST   | /validators/exit        | `curl -X POST http://localhost:18000/validators/exit -H "Content-Type: application/json" -d '{"node_id":0}'`                                |
+| POST   | /validators/withdraw    | `curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: application/json" -d '{"node_id":0}'`                            |
 
 Notes:
 - `GET /users/default/balance` returns `token_one` = burn balance, `token_two` = claim balance.

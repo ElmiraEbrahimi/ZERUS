@@ -31,6 +31,14 @@ type Config struct {
 	MerkleTreeContractAddress  string `env:"MERKLE_TREE_CONTRACT_ADDRESS,required"`
 	OracleContractAddress      string `env:"ORACLE_CONTRACT_ADDRESS,required"`
 
+	L1RPCURL                     string `env:"L1_RPC_URL"`
+	L1GasPriceWei                int64  `env:"L1_GAS_PRICE_WEI" default:"0"`
+	L1L2ValueWei                 string `env:"L1_L2_VALUE_WEI"`
+	L1MessengerContractAddress   string `env:"L1_MESSENGER_CONTRACT_ADDRESS"`
+	L2MessengerContractAddress   string `env:"L2_MESSENGER_CONTRACT_ADDRESS"`
+	L1MailboxAddress             string `env:"L1_MAILBOX_ADDRESS"`
+	L1UseDirectMessaging         bool   `env:"L1_USE_DIRECT_MESSAGING" default:"false"`
+
 	BlockchainURL string `env:"ZKSYNC_RPC_URL,required"`
 
 	OracleSeedX string `env:"ORACLE_SEED_X,required"`
@@ -39,6 +47,7 @@ type Config struct {
 	NodePK      string `env:"NODE_PK,required"`
 
 	ChainID                 int64 `env:"ZKSYNC_CHAIN_ID,required"`
+	L1ChainID               int64 `env:"L1_CHAIN_ID" default:"0"`
 	NodeCount               int   `env:"NODE_COUNT,required"`
 	SparseTreeDepth         int   `env:"SPARSE_TREE_DEPTH,required"`
 	BatchSize               int   `env:"BATCH_SIZE,required"`

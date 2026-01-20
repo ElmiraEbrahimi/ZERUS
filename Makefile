@@ -1,39 +1,49 @@
+ANNOUNCE_TARGET = @echo "==> $@"
+
 .PHONY: server
 server:
+	$(ANNOUNCE_TARGET)
 	cd go-server && go run ./cmd/server
 
 .PHONY: run-index
 run-index:
+	$(ANNOUNCE_TARGET)
 	cd go-server && go run ./cmd/runindex
 
 .PHONY: zksync
 zksync:
+	$(ANNOUNCE_TARGET)
 	@echo "Starting zkSync local stack via start.sh..."
 	@cd local-setup && chmod +x ./start.sh && ./start.sh
 
 .PHONY: l1
 l1:
+	$(ANNOUNCE_TARGET)
 	@echo "Starting local L1 node via start.sh..."
 	@cd local-setup && chmod +x ./start.sh && ./start.sh
 
 .PHONY: up-deploy
 up-deploy:
+	$(ANNOUNCE_TARGET)
 	cd local-setup && ./start.sh
 	$(MAKE) deploy
 
 .PHONY: up
 up:
+	$(ANNOUNCE_TARGET)
 	cd local-setup && ./start.sh
 
 .PHONY: down
 down:
+	$(ANNOUNCE_TARGET)
 	cd local-setup && ./clear.sh
 
 .PHONY: deploy
-deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle
+deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle deploy-messengers
 
-.PHONY: deploy-counter
+.PHONY: deploy-counter deploy-l2-messenger deploy-l1-messenger configure-l2-messenger deploy-messengers deploy-messengers-if-configured abigen-messengers ensure-l1-mailbox
 deploy-counter:
+	$(ANNOUNCE_TARGET)
 	@echo "Deploying Counter via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployCounter.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
@@ -66,14 +76,112 @@ deploy-counter:
 	@echo "Regenerated go-server/internal/eth/counter_abigen.go"
 	@echo "Deployment + ABI regeneration complete."
 
+deploy-l2-messenger:
+	$(ANNOUNCE_TARGET)
+	@echo "Deploying L2Messenger via forge-zksync..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	  forge script script/DeployL2Messenger.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
+	    2>&1 | tee /tmp/forge_l2_messenger_deploy.log
+
+	@addr=$$(awk '/L2Messenger deployed at/ {print $$4}' /tmp/forge_l2_messenger_deploy.log | tail -n1); \
+	if [ -z "$$addr" ]; then \
+		echo "ERROR: deployment succeeded but could not extract L2Messenger address from forge output" >&2; \
+		exit 1; \
+	fi; \
+	  echo "Detected L2Messenger contract address: $$addr"; \
+	if [ -f .env ]; then \
+		awk -v addr="$$addr" 'BEGIN{updated=0} \
+		/^L2_MESSENGER_CONTRACT_ADDRESS=/{print "L2_MESSENGER_CONTRACT_ADDRESS=" addr; updated=1; next} \
+		{print} \
+		END{if(!updated) print "L2_MESSENGER_CONTRACT_ADDRESS=" addr}' .env > .env.tmp && mv .env.tmp .env; \
+	else \
+		echo "L2_MESSENGER_CONTRACT_ADDRESS=$$addr" > .env; \
+	fi; \
+	  echo "Updated .env with L2_MESSENGER_CONTRACT_ADDRESS=$$addr"
+
+deploy-l1-messenger: ensure-l1-mailbox
+	$(ANNOUNCE_TARGET)
+	@echo "Deploying L1Messenger to L1 via forge..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	  gas_price="$${L1_GAS_PRICE_WEI:-1000000000}"; \
+	  forge script script/DeployL1Messenger.s.sol --rpc-url "$$L1_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --legacy --gas-price "$$gas_price" --broadcast \
+	    2>&1 | tee /tmp/forge_l1_messenger_deploy.log
+
+	@addr=$$(awk '/L1Messenger deployed at/ {print $$4}' /tmp/forge_l1_messenger_deploy.log | tail -n1); \
+	if [ -z "$$addr" ]; then \
+		echo "ERROR: deployment succeeded but could not extract L1Messenger address from forge output" >&2; \
+		exit 1; \
+	fi; \
+	  echo "Detected L1Messenger contract address: $$addr"; \
+	if [ -f .env ]; then \
+		awk -v addr="$$addr" 'BEGIN{updated=0} \
+		/^L1_MESSENGER_CONTRACT_ADDRESS=/{print "L1_MESSENGER_CONTRACT_ADDRESS=" addr; updated=1; next} \
+		{print} \
+		END{if(!updated) print "L1_MESSENGER_CONTRACT_ADDRESS=" addr}' .env > .env.tmp && mv .env.tmp .env; \
+	else \
+		echo "L1_MESSENGER_CONTRACT_ADDRESS=$$addr" > .env; \
+	fi; \
+	  echo "Updated .env with L1_MESSENGER_CONTRACT_ADDRESS=$$addr"
+
+configure-l2-messenger:
+	$(ANNOUNCE_TARGET)
+	@echo "Configuring L2Messenger with L1 address..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	if [ -z "$$L1_MESSENGER_CONTRACT_ADDRESS" ] || [ -z "$$L2_MESSENGER_CONTRACT_ADDRESS" ]; then \
+		echo "ERROR: L1_MESSENGER_CONTRACT_ADDRESS and L2_MESSENGER_CONTRACT_ADDRESS must be set before configuring L2Messenger." >&2; \
+		exit 1; \
+	fi; \
+	  forge script script/ConfigureL2Messenger.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
+	    2>&1 | tee /tmp/forge_l2_messenger_config.log
+
+abigen-messengers:
+	$(ANNOUNCE_TARGET)
+	@echo "Generating Go bindings for L1Messenger + L2Messenger via abigen..."
+	@cd contracts && forge build --extra-output-files abi >/dev/null
+	@abigen \
+	  --abi contracts/out/L1Messenger.sol/L1Messenger.abi.json \
+	  --pkg eth \
+	  --type L1Messenger \
+	  --out go-server/internal/eth/l1_messenger_abigen.go
+	@abigen \
+	  --abi contracts/out/L2Messenger.sol/L2Messenger.abi.json \
+	  --pkg eth \
+	  --type L2Messenger \
+	  --out go-server/internal/eth/l2_messenger_abigen.go
+	@echo "Regenerated go-server/internal/eth/l1_messenger_abigen.go"
+	@echo "Regenerated go-server/internal/eth/l2_messenger_abigen.go"
+
+deploy-messengers-if-configured:
+	$(ANNOUNCE_TARGET)
+	@if [ ! -f .env ]; then \
+		echo "Skipping L1 messenger deploy (.env not found)"; \
+		exit 0; \
+	fi
+	@set -a && . ./.env && set +a && \
+	if [ -z "$$L1_MAILBOX_ADDRESS" ]; then \
+		echo "Skipping L1 messenger deploy (L1_MAILBOX_ADDRESS not set)"; \
+		exit 0; \
+	fi; \
+	  $(MAKE) deploy-l1-messenger configure-l2-messenger
+
+deploy-messengers: deploy-l2-messenger deploy-l1-messenger configure-l2-messenger abigen-messengers
+
+ensure-l1-mailbox:
+	$(ANNOUNCE_TARGET)
+	@bash -x ./scripts/ensure-l1-mailbox.sh
 .PHONY: gnark-merkle-verifier deploy-merkle-verifier \
 	gnark-votingbatch-verifier deploy-votingbatch-verifier
 FORCE_ZK_KEYGEN ?= 1
 gnark-merkle-verifier:
+	$(ANNOUNCE_TARGET)
 	@echo "Generating MerkleProof Solidity verifier via gnark..."
 	@cd go-server && FORCE_ZK_KEYGEN=$(FORCE_ZK_KEYGEN) go run ./circuits/merkle_proof/cmd/gen_verifier/main.go
 
 deploy-merkle-verifier: gnark-merkle-verifier
+	$(ANNOUNCE_TARGET)
 	@echo "Deploying MerkleProofVerifier via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployMerkleProofVerifier.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
@@ -107,10 +215,12 @@ deploy-merkle-verifier: gnark-merkle-verifier
 	@echo "MerkleProof verifier deployment + ABI regeneration complete."
 
 gnark-votingbatch-verifier:
+	$(ANNOUNCE_TARGET)
 	@echo "Generating VotingBatch Solidity verifier via gnark..."
 	@cd go-server && FORCE_ZK_KEYGEN=$(FORCE_ZK_KEYGEN) go run ./circuits/voting_batch/cmd/gen_votingbatch_verifier/main.go
 
 deploy-votingbatch-verifier: gnark-votingbatch-verifier
+	$(ANNOUNCE_TARGET)
 	@echo "Deploying VotingBatchVerifier via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployVotingBatchVerifier.s.sol \
@@ -145,6 +255,7 @@ deploy-votingbatch-verifier: gnark-votingbatch-verifier
 
 .PHONY: deploy-oracle
 deploy-oracle:
+	$(ANNOUNCE_TARGET)
 	@echo "Deploying Oracle via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployOracle.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
@@ -178,6 +289,7 @@ deploy-oracle:
 	@echo "Deployment + ABI regeneration complete."
 .PHONY: deploy-merkle-tree
 deploy-merkle-tree:
+	$(ANNOUNCE_TARGET)
 	@echo "Deploying MerkleTree via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
 	  forge script script/DeployMerkleTree.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
@@ -215,6 +327,7 @@ deploy-merkle-tree:
 
 .PHONY: zip
 zip:
+	$(ANNOUNCE_TARGET)
 	@TIMESTAMP=$$(date +"%Y%m%d_%H%M%S"); \
 	zip -r archive_$$TIMESTAMP.zip . \
 		-x ".git/*" \
