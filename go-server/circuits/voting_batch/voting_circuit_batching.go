@@ -14,6 +14,7 @@ import (
 const (
 	RewardAggregator = 500000000000000
 	RewardValidator  = 20000000000
+	PenaltyValidator = 10000000000
 
 	cost1 = 1
 )
@@ -214,13 +215,21 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// isHonest = 1 if diff == 0, else 0
 		isHonest := api.IsZero(diff)  // 1 if diff==0 else 0
 		api.AssertIsBoolean(isHonest) // safety
-
-		// honest gets +RewardValidator, dishonest gets 0
+		// ////////////////////////////////////////////////////////////////
+		// honest gets +RewardValidator
 		rewardedBalance := api.Add(validator.Balance, RewardValidator)
-		zeroBalance := api.Sub(validator.Balance, validator.Balance)
 
-		// newBalance = isHonest ? rewardedBalance : 0
-		newBalance := api.Select(isHonest, rewardedBalance, zeroBalance)
+		// dishonest gets max(balance - PenaltyValidator, 0)
+		cmpBal := api.Cmp(validator.Balance, PenaltyValidator)     // -1 if bal<penalty, 0 if ==, 1 if >
+		isLess := api.IsZero(api.Add(cmpBal, 1))                   // 1 if cmpBal == -1 else 0
+		canPay := api.Sub(1, isLess)                               // 1 if bal>=penalty else 0
+
+		penalized := api.Sub(validator.Balance, PenaltyValidator)  // field subtraction OK; clamped by Select
+		penalizedOrZero := api.Select(canPay, penalized, 0)
+
+		// newBalance = isHonest ? (bal+reward) : max(bal-penalty, 0)
+		newBalance := api.Select(isHonest, rewardedBalance, penalizedOrZero)
+
 		//////////////////////////////////////////////////////
 		// Majority counting
 		// isHonest = 1 if vote == majority, else 0

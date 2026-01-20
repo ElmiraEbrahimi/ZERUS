@@ -80,7 +80,13 @@ func (o *Oracle) ApplyWiVoteSubmittedEvent(event *eth.OracleWiVoteSubmitted) err
 			if event.HonestBits.Bit(i) == 1 {
 				account.Balance.Add(account.Balance, big.NewInt(votingbatch.RewardValidator))
 			} else {
-				account.Balance.SetInt64(0)
+				// dishonest validator → subtract penalty, clamp at 0
+				penalty := big.NewInt(votingbatch.PenaltyValidator)
+				if account.Balance.Cmp(penalty) <= 0 {
+					account.Balance.SetInt64(0)
+				} else {
+					account.Balance.Sub(account.Balance, penalty)
+				}
 			}
 
 			if err := state.WriteAccount(account); err != nil {

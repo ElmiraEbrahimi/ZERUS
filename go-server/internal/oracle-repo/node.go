@@ -831,8 +831,14 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 				big.NewInt(votingbatch.RewardValidator),
 			)
 		} else {
-			// dishonest validator → FULL SLASH
-			validatorAccount.Balance.SetInt64(0)
+			// dishonest validator → SLASH
+			penalty := big.NewInt(votingbatch.PenaltyValidator)
+			if validatorAccount.Balance.Cmp(penalty) <= 0 {
+				validatorAccount.Balance.SetInt64(0)
+			} else {
+				validatorAccount.Balance.Sub(validatorAccount.Balance, penalty)
+			}
+			
 		}
 
 		err = n.state.WriteAccount(validatorAccount)
