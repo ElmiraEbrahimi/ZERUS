@@ -32,20 +32,31 @@ docker compose up -d
 
 
 check_all_services_healthy() {
-  service="zksync"
-  (docker compose ps $service | grep "(healthy)")
-  if [ $? -eq 0 ]; then
-    return 0
-  else
-    return 1  # If any service is not healthy, return 1
-  fi
+  docker compose ps zksync 2>/dev/null | grep -q "(healthy)"
 }
 
+# True if the zksync container has actually failed (exited / crash-looping /
+# marked unhealthy) rather than simply still starting up.
+zksync_has_failed() {
+  docker compose ps zksync 2>/dev/null | grep -qE "Exited|Restarting|unhealthy"
+}
 
+# NOTE: on Apple Silicon the zksync image only ships for linux/amd64, so it runs
+# under emulation. First "healthy" state typically takes ~2-4 min (genesis +
+# contract deploy), not seconds. The wait below is normal, not a hang.
+echo "Waiting for zksync to become healthy (runs under amd64 emulation; expect ~2-4 min)..."
+
+SECONDS=0
 # Loop until all services are healthy
 while ! check_all_services_healthy; do
-  echo "Services are not yet healthy, waiting..."
+  if zksync_has_failed; then
+    echo "ERROR: zksync container exited / is restarting / is unhealthy after ${SECONDS}s." >&2
+    echo "Recent logs:" >&2
+    docker compose logs --tail=40 zksync >&2
+    exit 1
+  fi
+  echo "Services are not yet healthy, waiting... (${SECONDS}s elapsed)"
   sleep 10  # Check every 10 seconds
 done
 
-echo "All services are healthy!"
+echo "All services are healthy! (took ${SECONDS}s)"
