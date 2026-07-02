@@ -1336,8 +1336,9 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	if err != nil {
 		log.Fatalf("failed to create keyed transactor: %v", err)
 	}
-	// trxOpts.GasPrice = big.NewInt(20000000000)
-	trxOpts.Value = big.NewInt(account.Balance.Int64())
+	// Paper SIV-C: the replacement stake must strictly exceed the incumbent's.
+	replacementStake := new(big.Int).Add(replaceAccount.Balance, big.NewInt(1))
+	trxOpts.Value = replacementStake
 
 	pendingNonce, err := n.ethClient.PendingNonceAt(context.Background(), trxOpts.From)
 	if err != nil {
@@ -1345,22 +1346,24 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
 
-	_, path, err := n.state.MerkleProofBytes(account.Index.Uint64())
+	// The Merkle proof must open the incumbent's leaf: the contract binds
+	// path[0] to hashAccount(toReplace) and verifies it at the target index.
+	_, path, err := n.state.MerkleProofBytes(replaceAccount.Index.Uint64())
 	if err != nil {
-		log.Fatalf("merkle proof failed (index=%d): %v", account.Index.Uint64(), err)
+		log.Fatalf("merkle proof failed (index=%d): %v", replaceAccount.Index.Uint64(), err)
 	}
 	fmt.Printf("*** About to replace account:\n")
-	fmt.Printf("  Index         : %x\n", replaceAccount.Index.String())
-	fmt.Printf("  PublicKey.X   : %x\n", replaceAccount.PublicKey.A.X.String())
-	fmt.Printf("  PublicKey.Y   : %x\n", replaceAccount.PublicKey.A.Y.String())
-	fmt.Printf("  Balance       : %x\n", replaceAccount.Balance.String())
+	fmt.Printf("  Index         : %s\n", replaceAccount.Index.String())
+	fmt.Printf("  PublicKey.X   : %s\n", replaceAccount.PublicKey.A.X.String())
+	fmt.Printf("  PublicKey.Y   : %s\n", replaceAccount.PublicKey.A.Y.String())
+	fmt.Printf("  Balance       : %s\n", replaceAccount.Balance.String())
 
 	tx, err := bcClient.Replace(
 		trxOpts,
 		*gnark.PublicKeyToOraclePublicKey(account.PublicKey),
 		*gnark.AccountToOracleAccount(&replaceAccount),
 		path[:], // Convert fixed-size array to slice
-		new(big.Int).Set(account.Index),
+		new(big.Int).Set(replaceAccount.Index),
 		big.NewInt(int64(n.cfg.SparseTreeDepth)),
 	)
 	if err != nil {
@@ -1382,9 +1385,11 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
 	}
 
-	// 6. Update local state
-	account.Balance = big.NewInt(0)
-	if err := n.state.WriteAccount(account); err != nil {
+	// 6. Update local state to mirror the on-chain leaf replacement: the
+	// target slot now holds the caller's key with the new (higher) stake.
+	replaceAccount.PublicKey = account.PublicKey
+	replaceAccount.Balance = replacementStake
+	if err := n.state.WriteAccount(replaceAccount); err != nil {
 		log.Fatalf("failed to update account after replace: %v", err)
 	}
 

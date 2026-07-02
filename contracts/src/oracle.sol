@@ -289,7 +289,12 @@ contract Oracle is MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) public payable {
-        require(msg.value >= toReplace.balance || true, "value too low");
+        // Paper SIV-C: a replacement candidate must lock a strictly higher
+        // stake than the validator being replaced.
+        require(
+            msg.value > toReplace.balance,
+            "replacement stake must exceed incumbent stake"
+        );
 
         require(
             path[0] == hashAccount(toReplace),
