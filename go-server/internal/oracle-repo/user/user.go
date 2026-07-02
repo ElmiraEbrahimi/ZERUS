@@ -367,6 +367,17 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 	return latestIPFSHash, nil
 }
 
+// destinationID returns the per-deployment destination-rollup identifier
+// d_dst (paper SIV-E; F-24): configured per Gateway instance, used when
+// forming the burn commitment C = H(n_rd || s_rd || d_dst).
+func (u *User) destinationID() (*big.Int, error) {
+	id, ok := new(big.Int).SetString(u.cfg.DestinationID, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid DESTINATION_ID %q", u.cfg.DestinationID)
+	}
+	return id, nil
+}
+
 // isPublishedCommitmentRoot checks the Gateway's record of commitment roots
 // (paper SIV-E Steps 6-7).
 func (u *User) isPublishedCommitmentRoot(root *big.Int) (bool, error) {
@@ -409,7 +420,11 @@ func (u *User) BurnTx() (string, string, error) {
 	}
 
 	// calculate the commitment hash:
-	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash()
+	destinationID, err := u.destinationID()
+	if err != nil {
+		return "", "", err
+	}
+	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash(destinationID)
 
 	// burn the amount:
 	var commitmentHash [32]byte
@@ -670,8 +685,22 @@ func (u *User) AwaitClaimCredit(preClaimBalance uint, timeout time.Duration) (ui
 	}
 }
 
-func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {
-	hGo := hash.MIMC_BN254.New()
+// NullifierHashBytes computes H(n_rd) over the canonical 32-byte field
+// encoding of the nullifier, matching the in-circuit MiMC hash of the field
+// element. Hashing the unpadded nullifier bytes diverges for nullifiers
+// with leading zero bytes (~1/256 of runs; F-25).
+func NullifierHashBytes(nullifier *big.Int) []byte {
+	h := hash.MIMC_BN254.New()
+	h.Reset()
+	h.Write(util.PadTo32Bytes(nullifier))
+	return h.Sum(nil)
+}
+
+// CalculateCommitmentHash draws a fresh (nullifier, secret) pair and forms
+// the burn commitment C = H(n_rd || s_rd || d_dst) (paper SIV-E). The
+// destination-rollup identifier d_dst is a per-deployment configuration
+// value (F-24), one per Gateway instance.
+func CalculateCommitmentHash(destinationID *big.Int) (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {
 	mod := ecc.BN254.ScalarField()
 	nullifier, _ := util.GenerateRandomBigInt32Bytes(mod)
 	secret, _ := util.GenerateRandomBigInt32Bytes(mod)
@@ -680,14 +709,10 @@ func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHa
 	mimcHash.Reset()
 	mimcHash.Write(util.PadTo32Bytes(nullifier))
 	mimcHash.Write(util.PadTo32Bytes(secret))
-	destinationID := new(big.Int)
-	destinationID.SetString("9636219578937187601590327046728695236698322465209974782280717458744997515735", 10)
 	mimcHash.Write(util.PadTo32Bytes(destinationID))
 	commitmentHash := mimcHash.Sum(nil)
 
-	hGo.Reset()
-	hGo.Write(nullifier.Bytes())
-	nullifierHash := hGo.Sum(nil)
+	nullifierHash := NullifierHashBytes(nullifier)
 
 	commitmentHashBytes = []byte(commitmentHash)
 	nullifierBytes = []byte(util.PadTo32Bytes(nullifier))

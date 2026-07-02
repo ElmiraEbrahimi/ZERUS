@@ -52,6 +52,10 @@ type Config struct {
 	SparseTreeDepth         int   `env:"SPARSE_TREE_DEPTH,required"`
 	BatchSize               int   `env:"BATCH_SIZE,required"`
 	IncTreeDepth            int   `env:"INC_TREE_DEPTH,required"`
+	// DestinationID is the per-deployment destination-rollup identifier
+	// d_dst (paper SIV-E; F-24): one value per Gateway instance, used in the
+	// burn commitment C = H(n_rd || s_rd || d_dst). Decimal field element.
+	DestinationID string `env:"DESTINATION_ID" default:"9636219578937187601590327046728695236698322465209974782280717458744997515735"`
 	TxGasLimit              int64 `env:"TX_GAS_LIMIT" default:"3000000"`
 	TxGasPriceWei           int64 `env:"TX_GAS_PRICE_WEI" default:"20000000000"`
 	TxGasFeeCapWei          int64 `env:"TX_GAS_FEE_CAP_WEI" default:"0"`
