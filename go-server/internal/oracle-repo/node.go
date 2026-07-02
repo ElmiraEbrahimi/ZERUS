@@ -78,7 +78,63 @@ type Node struct {
 	IncVotes     map[string]map[uint]*IncVote `json:"inc_votes"`
 	WiVotes      map[string]map[uint]*WiVote  `json:"wi_votes"`
 
+	// Local view of the committee's nullifier spent-list (paper SIV-E,
+	// Theorem 2). The authoritative copy lives in the DFS; this cache is
+	// merged from fetched DFS content and from ClaimMinted events.
+	spentNullifiersLock sync.Mutex
+	spentNullifiers     map[string]bool
+
 	BatchedWiVote *BatchedWiVote
+}
+
+// MarkNullifierSpent records a nullifier hash (0x-prefixed hex) in the node's
+// local view of the committee spent-list.
+func (n *Node) MarkNullifierSpent(nullifierHash string) {
+	n.spentNullifiersLock.Lock()
+	defer n.spentNullifiersLock.Unlock()
+	if n.spentNullifiers == nil {
+		n.spentNullifiers = make(map[string]bool)
+	}
+	n.spentNullifiers[nullifierHash] = true
+}
+
+// IsNullifierSpent reports whether the nullifier hash is in the node's local
+// view of the committee spent-list.
+func (n *Node) IsNullifierSpent(nullifierHash string) bool {
+	n.spentNullifiersLock.Lock()
+	defer n.spentNullifiersLock.Unlock()
+	return n.spentNullifiers[nullifierHash]
+}
+
+// MergeSpentNullifiers folds a spent-list fetched from the DFS into the
+// node's local view.
+func (n *Node) MergeSpentNullifiers(spent map[string]bool) {
+	if len(spent) == 0 {
+		return
+	}
+	n.spentNullifiersLock.Lock()
+	defer n.spentNullifiersLock.Unlock()
+	if n.spentNullifiers == nil {
+		n.spentNullifiers = make(map[string]bool)
+	}
+	for k, v := range spent {
+		if v {
+			n.spentNullifiers[k] = true
+		}
+	}
+}
+
+// SpentNullifiersSnapshot returns a copy of the node's local spent-list.
+func (n *Node) SpentNullifiersSnapshot() map[string]bool {
+	n.spentNullifiersLock.Lock()
+	defer n.spentNullifiersLock.Unlock()
+	out := make(map[string]bool, len(n.spentNullifiers))
+	for k, v := range n.spentNullifiers {
+		if v {
+			out[k] = true
+		}
+	}
+	return out
 }
 
 func NewNode(cfg *config.Config, ethClient *ethclient.Client, ipfsClient *db.IPFSClient, oracle *Oracle, id uint, privateKey *eddsa.PrivateKey, offeredAmount uint, role uint, validatorAccounts []*gnark.Account) *Node {
@@ -296,8 +352,21 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 		return nil, fmt.Errorf("failed to unmarshal public witness (node=%v): %v", n.ID, err)
 	}
 
+	// Consult the committee's DFS spent-list before verifying the Redeeming
+	// proof (paper SIV-E): a claim whose nullifier hash is already spent is
+	// rejected regardless of proof validity (Theorem 2).
+	nullifierKey := common.BytesToHash(claimEvent.NullifierHash[:]).Hex()
+	if n.IPFSClient != nil && n.IPFSClient.LatestHash != "" {
+		if content := n.FetchIPFS(); content != nil {
+			n.MergeSpentNullifiers(content.SpentNullifiers)
+		}
+	}
+
 	var isApproved *big.Int
-	if err := groth16.Verify(proof, n.Oracle.IncVK, publicWitness); err != nil {
+	if n.IsNullifierSpent(nullifierKey) {
+		fmt.Printf("rejecting claim: nullifier already spent (node=%v nullifier=%s)\n", n.ID, nullifierKey)
+		isApproved = big.NewInt(0)
+	} else if err := groth16.Verify(proof, n.Oracle.IncVK, publicWitness); err != nil {
 		fmt.Printf("failed to verify claim proof (node=%v): %v\n", n.ID, err)
 		isApproved = big.NewInt(0)
 	} else {

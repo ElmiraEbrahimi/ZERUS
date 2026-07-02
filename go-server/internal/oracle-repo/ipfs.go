@@ -10,6 +10,10 @@ import (
 type IPFSContent struct {
 	CommitmentHashIncVote map[string]IncVote           `json:"commitment_hash_inc_vote"`
 	IncMerkleTree         merkle.IncrementalMerkleTree `json:"inc_merkle_tree"`
+	// SpentNullifiers is the committee's nullifier spent-list (paper SIV-E):
+	// validators reject a claim whose nullifier hash is already recorded here.
+	// Keys are 0x-prefixed 32-byte nullifier hashes.
+	SpentNullifiers map[string]bool `json:"spent_nullifiers"`
 }
 
 func (c *IPFSContent) Serialize() ([]byte, error) {
@@ -41,14 +45,35 @@ func (n *Node) FetchIPFS() *IPFSContent {
 	if content == nil {
 		return &IPFSContent{
 			CommitmentHashIncVote: make(map[string]IncVote),
+			SpentNullifiers:       make(map[string]bool),
 		}
 	}
 	ipfsContent, err := DeserializeIPFSContent(content)
 	if err != nil {
 		panic(fmt.Errorf("failed to deserialize ipfs content (node_id=%v): %v", err, n.ID))
 	}
+	if ipfsContent.SpentNullifiers == nil {
+		ipfsContent.SpentNullifiers = make(map[string]bool)
+	}
 
 	return ipfsContent
+}
+
+// PersistSpentNullifiers publishes the aggregator's spent-list to the DFS so
+// validators can consult it when verifying claims (paper SIV-E).
+func (n *Node) PersistSpentNullifiers() error {
+	if !n.IsAggregator() {
+		return fmt.Errorf("node is not an aggregator (node_id=%v)", n.ID)
+	}
+	content := n.FetchIPFS()
+	n.MergeSpentNullifiers(content.SpentNullifiers)
+	content.SpentNullifiers = n.SpentNullifiersSnapshot()
+	n.IPFSContent = content
+	latestHash, err := n.UpdateIPFS()
+	if err != nil {
+		return err
+	}
+	return n.updateLatestIPFSHashTx(latestHash)
 }
 
 func (n *Node) UpdateIPFS() (string, error) {

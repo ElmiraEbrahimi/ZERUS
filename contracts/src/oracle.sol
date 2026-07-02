@@ -48,6 +48,12 @@ contract Oracle is MerkleTree {
 
     mapping(uint256 => ClaimRequest) private claimRequests;
 
+    // Defensive double-spend guard (paper Theorem 2): the committee keeps the
+    // authoritative spent-list in the DFS, but the Gateway also refuses to
+    // accept or mint an already-spent nullifier, so replay is impossible even
+    // against a Byzantine committee.
+    mapping(bytes32 => bool) public spentNullifiers;
+
     mapping(uint => address) private validators;
     uint256[] private validatorsList;
 
@@ -221,6 +227,7 @@ contract Oracle is MerkleTree {
         bytes32 nullifierHash
     ) external {
         require(users[msg.sender] == true, "address not registered");
+        require(!spentNullifiers[nullifierHash], "nullifier already spent");
 
         uint256 uniqueID = nextClaimID;
         nextClaimID++;
@@ -292,11 +299,16 @@ contract Oracle is MerkleTree {
                 continue;
             }
             ClaimRequest storage request = claimRequests[baseID + i];
-            if (request.from == address(0) || request.isClaimed) {
+            if (
+                request.from == address(0) ||
+                request.isClaimed ||
+                spentNullifiers[request.nullifierHash]
+            ) {
                 continue;
             }
             request.isApproved = true;
             request.isClaimed = true;
+            spentNullifiers[request.nullifierHash] = true;
             tokenClaimBalances[request.from] += BURN_AMOUNT;
             emit ClaimMinted(baseID + i, request.from, request.nullifierHash);
         }

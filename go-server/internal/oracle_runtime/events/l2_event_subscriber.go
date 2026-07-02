@@ -331,6 +331,8 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 		l.handleBurnSubmitted(evlog)
 	case "ClaimSubmitted":
 		l.handleClaimSubmitted(evlog)
+	case "ClaimMinted":
+		l.handleClaimMinted(evlog)
 	case "Exiting":
 		l.handleExiting(evlog)
 	case "NewAggregator":
@@ -406,6 +408,48 @@ func (l *L2ContractEventSubscriber) handleClaimSubmitted(evlog types.Log) {
 	if err := l.applyClaimSubmittedEvent(evt); err != nil {
 		log.Printf("l2 event ClaimSubmitted: apply error: %v", err)
 	}
+}
+
+func (l *L2ContractEventSubscriber) handleClaimMinted(evlog types.Log) {
+	evt, err := l.filterer.ParseClaimMinted(evlog)
+	if err != nil {
+		log.Printf("l2 event ClaimMinted: parse error: %v", err)
+		return
+	}
+	log.Printf(
+		"l2 event ClaimMinted: uniqueID=%s recipient=%s nullifierHash=%s %s",
+		evt.UniqueID,
+		evt.Recipient.Hex(),
+		common.BytesToHash(evt.NullifierHash[:]).Hex(),
+		eventMeta(evlog),
+	)
+	if err := l.applyClaimMintedEvent(evt); err != nil {
+		log.Printf("l2 event ClaimMinted: apply error: %v", err)
+	}
+}
+
+// applyClaimMintedEvent records the minted claim's nullifier in every node's
+// spent-list; the aggregator publishes the updated list to the DFS so
+// validators reject any replay of the same burn (paper SIV-E, Theorem 2).
+func (l *L2ContractEventSubscriber) applyClaimMintedEvent(evt *eth.OracleClaimMinted) error {
+	if l.engine == nil || l.engine.Oracle == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	nullifierKey := common.BytesToHash(evt.NullifierHash[:]).Hex()
+	var aggregator *oracle.Node
+	for _, node := range l.engine.Oracle.Nodes {
+		if node == nil {
+			continue
+		}
+		node.MarkNullifierSpent(nullifierKey)
+		if node.IsAggregator() {
+			aggregator = node
+		}
+	}
+	if aggregator == nil {
+		return nil
+	}
+	return aggregator.PersistSpentNullifiers()
 }
 
 func (l *L2ContractEventSubscriber) handleExiting(evlog types.Log) {
