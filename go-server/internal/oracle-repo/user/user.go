@@ -19,12 +19,13 @@ import (
 	"l2alchemy/internal/oracle-repo/merkle"
 	"l2alchemy/internal/oracle-repo/util"
 	"log"
-	"math/bits"
 	"math/big"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	_ "github.com/consensys/gnark-crypto/ecc/bn254/fr/mimc"
@@ -615,12 +616,35 @@ func (u *User) WithdrawTx() (string, error) {
 	if postBurnBalance != preBurnBalance {
 		return "", fmt.Errorf("withdraw unexpectedly changed burn balance (user=%v before=%d after=%d)", u.Name, preBurnBalance, postBurnBalance)
 	}
-	if postClaimBalance <= preClaimBalance {
-		return "", fmt.Errorf("withdraw did not increase claim balance (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
+	// Claims are pending until the committee finalizes the round: tokens are
+	// minted by submitWiVote after the Aggregating proof verifies (paper
+	// SIV-E Step 17), so the claim balance must be unchanged here.
+	if postClaimBalance != preClaimBalance {
+		return "", fmt.Errorf("claim credited before batch finalization (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
 	}
-	log.Printf("withdraw balances user=%v burn=%d claim=%d->%d", u.Name, postBurnBalance, preClaimBalance, postClaimBalance)
+	log.Printf("claim submitted, pending batch verification: user=%v burn=%d claim=%d", u.Name, postBurnBalance, postClaimBalance)
 
 	return tx.Hash().Hex(), nil
+}
+
+// AwaitClaimCredit polls the user's claim balance until it exceeds the given
+// pre-claim balance (i.e. the round containing the claim was finalized and
+// minted by submitWiVote) or the timeout elapses.
+func (u *User) AwaitClaimCredit(preClaimBalance uint, timeout time.Duration) (uint, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		_, claimBalance, err := u.GetBalance()
+		if err != nil {
+			return 0, fmt.Errorf("fetch claim balance (user=%v): %w", u.Name, err)
+		}
+		if claimBalance > preClaimBalance {
+			return claimBalance, nil
+		}
+		if time.Now().After(deadline) {
+			return claimBalance, fmt.Errorf("claim not credited within %s (user=%v balance=%d)", timeout, u.Name, claimBalance)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func CalculateCommitmentHash() (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {

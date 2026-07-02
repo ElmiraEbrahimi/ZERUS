@@ -54,7 +54,10 @@ contract Oracle is MerkleTree {
     uint256 private aggregator;
     uint256 private aggregatorIdx = type(uint256).max; // sentinel: forces first selection to index 0
 
-    uint256 private roundID = 1;
+    // Deterministic batching (paper SIV-D): claims receive sequential
+    // identifiers so that round r covers exactly [r*b, (r+1)*b - 1].
+    uint256 public immutable batchSize;
+    uint256 private nextClaimID;
 
     mapping(uint256 => address) accounts;
     mapping(uint256 => uint256) wiVotes;
@@ -102,6 +105,12 @@ contract Oracle is MerkleTree {
         uint256 majorityVote
     );
 
+    event ClaimMinted(
+        uint256 uniqueID,
+        address recipient,
+        bytes32 nullifierHash
+    );
+
     event Replaced(address indexed sender, address indexed replaced);
     event Exiting(address indexed sender);
     event Withdrawn(address indexed sender);
@@ -112,12 +121,15 @@ contract Oracle is MerkleTree {
         uint256 _levels,
         uint256 _seedX,
         uint256 _seedY,
-        address votingVerifierAddress
+        address votingVerifierAddress,
+        uint256 _batchSize
     ) MerkleTree(_levels) {
+        require(_batchSize > 0 && _batchSize <= 256, "invalid batch size");
         levels = _levels;
         seedX = _seedX;
         seedY = _seedY;
         votingVerifier = VotingVerifier(votingVerifierAddress);
+        batchSize = _batchSize;
     }
 
     // region 1.register
@@ -200,30 +212,28 @@ contract Oracle is MerkleTree {
 
     // region 3.claim
 
+    /// @notice Record a claim request (paper SIV-E Steps 10-11): the Gateway
+    /// assigns a batch-policy identifier and emits a claim event. Tokens are
+    /// minted only after the round's Aggregating proof verifies (Step 17).
     function claim(
         bytes memory proof,
         bytes memory publicWitness,
         bytes32 nullifierHash
     ) external {
         require(users[msg.sender] == true, "address not registered");
-        uint256 uniqueID = roundID;
 
-        require(
-            claimRequests[uniqueID].uniqueID == 0,
-            "uniqueID already done/claimed"
-        );
+        uint256 uniqueID = nextClaimID;
+        nextClaimID++;
+
         claimRequests[uniqueID] = ClaimRequest(
             uniqueID,
             msg.sender,
             proof,
             publicWitness,
             nullifierHash,
-            true,
-            true
+            false,
+            false
         );
-        tokenClaimBalances[msg.sender] += BURN_AMOUNT;
-
-        roundID++;
 
         emit ClaimSubmitted(uniqueID, proof, publicWitness, nullifierHash);
     }
@@ -232,9 +242,13 @@ contract Oracle is MerkleTree {
 
     // region 4.wivote
 
+    /// @notice Finalize a verification round (paper SIV-E Steps 16-17): the
+    /// aggregator submits the batch outcome with the Aggregating proof; the
+    /// Gateway verifies it, mints tokens for accepted claims, and applies the
+    /// validator-state update.
     function submitWiVote(
         uint256 index,
-        uint256 uniqueReqID,
+        uint256 roundId,
         uint256 batchCommitment,
         uint256 validatorBits,
         uint256 honestBits,
@@ -245,15 +259,15 @@ contract Oracle is MerkleTree {
         uint256[8] memory proof
     ) public {
         require(accounts[index] == msg.sender, "invalid index");
-        require(wiVotes[uniqueReqID] == 0, "already submitted");
+        require(wiVotes[roundId] == 0, "already submitted");
 
-        wiVotes[uniqueReqID] = vote;
+        wiVotes[roundId] = vote;
 
         uint[11] memory input = [
             postStateRoot,
-            uniqueReqID, //  roundID
+            roundId,
             batchCommitment,
-            vote, // majority vote
+            vote, // threshold-supported majority vote bitmask
             validatorBits,
             honestBits,
             index,
@@ -269,13 +283,25 @@ contract Oracle is MerkleTree {
         seedY = postSeedY;
 
         setRoot(postStateRoot);
-        emit WiVoteSubmitted(
-            index,
-            validatorBits,
-            honestBits,
-            uniqueReqID,
-            vote
-        );
+
+        // Mint accepted claims: bit i of the threshold-supported bitmask
+        // corresponds to claim identifier roundId*batchSize + i (SIV-D).
+        uint256 baseID = roundId * batchSize;
+        for (uint256 i = 0; i < batchSize; i++) {
+            if ((vote >> i) & 1 == 0) {
+                continue;
+            }
+            ClaimRequest storage request = claimRequests[baseID + i];
+            if (request.from == address(0) || request.isClaimed) {
+                continue;
+            }
+            request.isApproved = true;
+            request.isClaimed = true;
+            tokenClaimBalances[request.from] += BURN_AMOUNT;
+            emit ClaimMinted(baseID + i, request.from, request.nullifierHash);
+        }
+
+        emit WiVoteSubmitted(index, validatorBits, honestBits, roundId, vote);
     }
 
     // endregion

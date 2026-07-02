@@ -11,6 +11,7 @@ contract DeployOracle is Script {
         uint256 levels = vm.envUint("SPARSE_TREE_DEPTH");
         uint256 seedX = vm.envUint("ORACLE_SEED_X");
         uint256 seedY = vm.envUint("ORACLE_SEED_Y");
+        uint256 batchSize = vm.envUint("BATCH_SIZE");
 
         address votingVerifierAddress = vm.envAddress(
             "VOTING_BATCH_VERIFIER_ADDRESS"
@@ -22,7 +23,8 @@ contract DeployOracle is Script {
             levels,
             seedX,
             seedY,
-            votingVerifierAddress
+            votingVerifierAddress,
+            batchSize
         );
 
         oracleAddr = address(oracle);

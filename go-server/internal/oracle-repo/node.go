@@ -185,13 +185,26 @@ func (n *Node) Start() {
 					fmt.Printf("aggregator (node=%d) is performing wiVote selection...\n", n.ID)
 					fmt.Printf("wivotes: %v\n", n.WiVotes)
 					if len(n.WiVotes) != 0 {
+						// Process claim requests in ascending identifier
+						// order so batched votes line up with the
+						// deterministic round windows of SIV-D.
+						reqIDs := make([]*big.Int, 0, len(n.WiVotes))
 						for uniqueReqID := range n.WiVotes {
+							id, ok := new(big.Int).SetString(uniqueReqID, 10)
+							if !ok {
+								panic(fmt.Errorf("invalid wiVote request id: %q", uniqueReqID))
+							}
+							reqIDs = append(reqIDs, id)
+						}
+						sort.Slice(reqIDs, func(i, j int) bool {
+							return reqIDs[i].Cmp(reqIDs[j]) < 0
+						})
+						for _, id := range reqIDs {
 							// aggregator wiVote process:
-							err := n.AggregatorProcessWiVote(uniqueReqID)
+							err := n.AggregatorProcessWiVote(id.String())
 							if err != nil {
 								panic(fmt.Errorf("failed to process wiVote: %v", err))
 							}
-
 						}
 					}
 
@@ -582,7 +595,20 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	if len(batchIDs) == 0 {
 		return nil, fmt.Errorf("empty withdrawal request batch")
 	}
-	roundID := new(big.Int).Set(batchIDs[0])
+	// Deterministic batching rule (paper SIV-D): round r contains exactly the
+	// claim identifiers [r*b, (r+1)*b - 1]. The Gateway assigns sequential
+	// IDs, so the sorted batch must form that window; its round identifier is
+	// id/b.
+	b := big.NewInt(int64(n.cfg.BatchSize))
+	roundID := new(big.Int).Div(batchIDs[0], b)
+	windowBase := new(big.Int).Mul(roundID, b)
+	for i, id := range batchIDs {
+		expected := new(big.Int).Add(windowBase, big.NewInt(int64(i)))
+		if id.Cmp(expected) != 0 {
+			return nil, fmt.Errorf("batch does not form round window [%s..%s]: position %d has id %s, want %s",
+				windowBase, new(big.Int).Add(windowBase, big.NewInt(int64(n.cfg.BatchSize-1))), i, id, expected)
+		}
+	}
 
 	positions := make(map[string]int, len(batchIDs))
 	for i, id := range batchIDs {
@@ -637,7 +663,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	if majorityCount < threshold {
 		return nil, fmt.Errorf("no BFT quorum for vote mask: max=%d threshold=%d", majorityCount, threshold)
 	}
-
 
 	hfunc := hash.MIMC_BN254.New()
 	hfunc.Reset()
@@ -789,7 +814,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 			},
 			Signature: signature,
 			Vote:      new(big.Int).Set(validatorVoteMask),
-
 		}
 
 		fmt.Printf("Validator[%d] LeafHash Inputs:\n", i)
@@ -848,7 +872,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 			} else {
 				validatorAccount.Balance.Sub(validatorAccount.Balance, penalty)
 			}
-			
+
 		}
 
 		err = n.state.WriteAccount(validatorAccount)
