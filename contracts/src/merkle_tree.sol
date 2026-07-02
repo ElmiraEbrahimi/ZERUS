@@ -3,8 +3,6 @@
 pragma solidity ^0.8.0;
 import "./mimc.sol";
 
-import "forge-std/console.sol";
-
 contract MerkleTree {
     uint256 public constant ZERO_VALUE =
         4555114089170143013007615382799372902997177870479602349537353593038812875418;
@@ -20,8 +18,6 @@ contract MerkleTree {
         require(_levels < 9, "_levels should be less than 8");
 
         levels = _levels;
-        console.log("MerkleTree initialized with levels =", levels);
-        console.log("Max leaves = 2^levels =", 2 ** levels);
 
         for (uint32 i = 0; i < levels; i++) {
             filledSubtrees[i] = zeros(i);
@@ -41,9 +37,6 @@ contract MerkleTree {
     }
 
     function insert(uint256 leaf) internal {
-        console.log("Inserting new leaf. nextIndex =", nextIndex);
-        console.log("Max capacity (2^levels) =", 2 ** levels);
-        require(nextIndex != 2 ** levels, "tree is full");
         require(nextIndex != 2 ** levels, "tree is full");
         uint256 left;
         uint256 right;
@@ -51,7 +44,6 @@ contract MerkleTree {
         uint256 currentHash = leaf;
 
         for (uint i = 0; i < levels; i++) {
-            console.log("Level", i, "currentIndex =", currentIndex);
             if (currentIndex % 2 == 0) {
                 left = currentHash;
                 right = zeros(i);

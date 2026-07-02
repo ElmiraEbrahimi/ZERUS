@@ -3,7 +3,6 @@
 pragma solidity ^0.8.0;
 
 import "./mimc.sol";
-import "forge-std/console.sol";
 import {Verifier as VotingVerifier} from "./VotingBatchVerifier.sol";
 import "./merkle_tree.sol";
 
@@ -246,14 +245,6 @@ contract Oracle is MerkleTree {
         uint256 postSeedY,
         uint256[8] memory proof
     ) public {
-        console.log("index", index);
-        console.log("uniqueReqID", uniqueReqID);
-        console.log("validatorBits", validatorBits);
-        console.log("vote", vote);
-        console.log("postStateRoot", postStateRoot);
-        console.log("postSeedX", postSeedX);
-        console.log("postSeedY", postSeedY);
-
         require(accounts[index] == msg.sender, "invalid index");
         require(wiVotes[uniqueReqID] == 0, "already submitted");
 
@@ -273,13 +264,11 @@ contract Oracle is MerkleTree {
             postSeedY
         ];
 
-        console.log("verifying proof...");
         votingVerifier.verifyProof(proof, input);
 
         seedX = postSeedX;
         seedY = postSeedY;
 
-        console.log("setting state root");
         setRoot(postStateRoot);
         emit WiVoteSubmitted(
             index,
@@ -301,10 +290,6 @@ contract Oracle is MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) public payable {
-        for (uint256 i = 0; i < path.length; i++) {
-            console.log(path[i]);
-        }
-
         // TODO: add here
 
         require(msg.value >= toReplace.balance || true, "value too low");
@@ -425,11 +410,6 @@ contract Oracle is MerkleTree {
         input[2] = account.pubKey.y;
         input[3] = account.balance;
 
-        console.log("***Solidity account.hash input:");
-        console.log("  index         :", account.index);
-        console.log("  pubKey.x      :", account.pubKey.x);
-        console.log("  pubKey.y      :", account.pubKey.y);
-        console.log("  balance       :", account.balance);
         return MiMC.hash(input);
     }
 
