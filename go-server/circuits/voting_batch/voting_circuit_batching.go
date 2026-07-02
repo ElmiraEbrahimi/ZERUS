@@ -255,10 +255,12 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// set honest bit if isHonest==1
 		honestBits = api.Add(honestBits, api.Mul(isHonest, bitMask))
 	}
-	// BFT quorum: threshold = 2*floor((n-1)/3) + 1
+	// Finalization threshold (paper SIV-A/SIV-D, Alg. 2 line 19): f + 1
+	// with f = floor((n-1)/3), guaranteeing at least one honest supporting
+	// validator under the BFT assumption n = 3f + 1.
 	n := len(c.Validators)
 	f := (n - 1) / 3
-	threshold := frontend.Variable(2*f + 1)
+	threshold := frontend.Variable(f + 1)
 
 	// require majorityCount >= threshold
 	cmp := api.Cmp(majorityCount, threshold) // -1 if <, 0 if ==, 1 if >

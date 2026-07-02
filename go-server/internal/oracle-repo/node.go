@@ -1710,10 +1710,13 @@ func check(name string, val *big.Int) {
 		fmt.Printf("✅ %s is within scalar field\n  → value: %s\n", name, val.String())
 	}
 }
+// bftThreshold returns the paper's finalization threshold (SIV-A/SIV-D,
+// Alg. 2 line 19): f + 1 with f = floor((n-1)/3), i.e. at least one honest
+// supporting validator under the BFT assumption n = 3f + 1.
 func bftThreshold(nValidators int) int {
 	if nValidators <= 0 {
 		return 0
 	}
 	f := (nValidators - 1) / 3
-	return 2*f + 1
+	return f + 1
 }
