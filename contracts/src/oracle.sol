@@ -68,6 +68,16 @@ contract Oracle is MerkleTree {
     uint256 private aggregator;
     uint256 private aggregatorIdx = type(uint256).max; // sentinel: forces first selection to index 0
 
+    // Aggregator rotation (paper SIV-C): handover is allowed only after the
+    // on-chain timeout elapses without a finalized round, or immediately
+    // after a successful round finalization (normal round-robin rotation).
+    uint256 public immutable aggregatorTimeout;
+    uint256 private roundStartedAt;
+    bool private rotationReady;
+
+    mapping(address => bool) private isValidator;
+    mapping(uint256 => bool) private roundFinalized;
+
     // Deterministic batching (paper SIV-D): claims receive sequential
     // identifiers so that round r covers exactly [r*b, (r+1)*b - 1].
     uint256 public immutable batchSize;
@@ -142,7 +152,8 @@ contract Oracle is MerkleTree {
         uint256 _seedX,
         uint256 _seedY,
         address votingVerifierAddress,
-        uint256 _batchSize
+        uint256 _batchSize,
+        uint256 _aggregatorTimeout
     ) MerkleTree(_levels) {
         require(_batchSize > 0 && _batchSize <= 256, "invalid batch size");
         levels = _levels;
@@ -150,6 +161,8 @@ contract Oracle is MerkleTree {
         seedY = _seedY;
         votingVerifier = VotingVerifier(votingVerifierAddress);
         batchSize = _batchSize;
+        aggregatorTimeout = _aggregatorTimeout;
+        roundStartedAt = block.timestamp;
     }
 
     // region 1.register
@@ -164,6 +177,7 @@ contract Oracle is MerkleTree {
         );
         validators[validatorID] = msg.sender;
         validatorsList.push(validatorID);
+        isValidator[msg.sender] = true;
 
         Account memory account = Account(
             getNextLeafIndex(),
@@ -280,7 +294,12 @@ contract Oracle is MerkleTree {
         uint256[8] memory proof
     ) public {
         require(accounts[index] == msg.sender, "invalid index");
-        require(wiVotes[roundId] == 0, "already submitted");
+        // Only the designated round aggregator may finalize (paper SIV-D).
+        require(index == aggregator, "not current aggregator");
+        // Dedicated sentinel: an all-zero majority bitmask must also
+        // finalize the round exactly once.
+        require(!roundFinalized[roundId], "round already finalized");
+        roundFinalized[roundId] = true;
 
         wiVotes[roundId] = vote;
 
@@ -327,6 +346,11 @@ contract Oracle is MerkleTree {
             emit ClaimMinted(baseID + i, request.from, request.nullifierHash);
         }
 
+        // Round finalized: allow the normal round-robin handover and restart
+        // the timeout clock (paper SIV-C).
+        rotationReady = true;
+        roundStartedAt = block.timestamp;
+
         emit WiVoteSubmitted(index, validatorBits, honestBits, roundId, vote);
     }
 
@@ -365,6 +389,7 @@ contract Oracle is MerkleTree {
         address payable replacedAddr = payable(accounts[toReplace.index]);
         // Effects first: prevent the old owner from re-entering as the current owner
         accounts[toReplace.index] = msg.sender;
+        isValidator[msg.sender] = true;
         // Interaction last
         (bool ok, ) = replacedAddr.call{value: toReplace.balance}("");
         require(ok, "ETH_TRANSFER_FAILED");
@@ -419,8 +444,21 @@ contract Oracle is MerkleTree {
         return aggregator;
     }
 
+    /// @notice Advance to the next round-robin aggregator (paper SIV-C).
+    /// Validators may trigger the handover only after a finalized round
+    /// (normal rotation) or once the on-chain timeout has elapsed without
+    /// finalization.
     function chooseNewAggregator() external {
+        require(isValidator[msg.sender], "not a registered validator");
+        require(
+            rotationReady ||
+                block.timestamp >= roundStartedAt + aggregatorTimeout,
+            "aggregator timeout not reached"
+        );
         require(validatorsList.length > 0, "no validators registered");
+
+        rotationReady = false;
+        roundStartedAt = block.timestamp;
 
         if (aggregatorIdx >= validatorsList.length - 1) {
             aggregatorIdx = 0;
