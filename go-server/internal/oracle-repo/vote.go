@@ -44,6 +44,15 @@ type WiVote struct {
 	Signature  []byte
 }
 
+// SignedBatchVote is a validator's own b-bit batch vote bitmask, signed by
+// the validator itself over H(index, C_batch, vote, round) (paper SIV-D
+// Step 14, Alg. 2 lines 12-13). The aggregator must consume it unmodified.
+type SignedBatchVote struct {
+	Index     *big.Int
+	Vote      *big.Int
+	Signature []byte
+}
+
 func (v *WiVote) Serialize() []byte {
 	var b [wiVoteSize]byte
 

@@ -84,6 +84,12 @@ type Node struct {
 	spentNullifiersLock sync.Mutex
 	spentNullifiers     map[string]bool
 
+	// The node's own per-request claim votes (request ID -> 0/1), recorded
+	// when the node verifies a claim. Used to build and sign the node's own
+	// batch bitmask (paper SIV-D Step 14); only this node ever signs it.
+	myVotesLock sync.Mutex
+	myVotes     map[string]*big.Int
+
 	BatchedWiVote *BatchedWiVote
 }
 
@@ -394,6 +400,10 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 		isApproved = big.NewInt(1)
 	}
 
+	// Keep the node's own verdict so it can sign its own batch bitmask
+	// later (paper SIV-D Step 14; F-11).
+	n.recordOwnVote(claimEvent.UniqueID.String(), isApproved)
+
 	wivote := WiVote{
 		Index:      n.Account.Index,
 		RequestID:  claimEvent.UniqueID,
@@ -418,6 +428,54 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 	}
 
 	return &wivote, nil
+}
+
+// recordOwnVote stores this node's verdict for a claim request so the node
+// can later build and sign its own batch bitmask (paper SIV-D Step 14).
+func (n *Node) recordOwnVote(requestID string, isApproved *big.Int) {
+	n.myVotesLock.Lock()
+	defer n.myVotesLock.Unlock()
+	if n.myVotes == nil {
+		n.myVotes = make(map[string]*big.Int)
+	}
+	n.myVotes[requestID] = new(big.Int).Set(isApproved)
+}
+
+// SignBatchVote builds this node's b-bit vote bitmask for the round window
+// batchIDs (ascending) from its own recorded per-request votes and signs
+// H(index, C_batch, vote, round) with its own key (paper SIV-D Step 14,
+// Alg. 2 lines 12-13). The aggregator must consume the artifact unmodified.
+func (n *Node) SignBatchVote(batchIDs []*big.Int, roundID *big.Int, batchCommitment []byte) (*SignedBatchVote, error) {
+	mask := big.NewInt(0)
+	n.myVotesLock.Lock()
+	for pos, id := range batchIDs {
+		vote, ok := n.myVotes[id.String()]
+		if !ok {
+			n.myVotesLock.Unlock()
+			return nil, fmt.Errorf("node %d has no recorded vote for request %s", n.ID, id.String())
+		}
+		if vote != nil && vote.Sign() != 0 {
+			mask.SetBit(mask, pos, 1)
+		}
+	}
+	n.myVotesLock.Unlock()
+
+	msg := hashBatchVoteFieldwise(
+		new(big.Int).Set(n.Account.Index),
+		new(big.Int).SetBytes(batchCommitment[:32]),
+		new(big.Int).Set(mask),
+		new(big.Int).Set(roundID),
+	)
+	hfunc := hash.MIMC_BN254.New()
+	sig, err := n.privateKey.Sign(msg, hfunc)
+	if err != nil {
+		return nil, fmt.Errorf("sign batch vote (node=%d): %w", n.ID, err)
+	}
+	return &SignedBatchVote{
+		Index:     new(big.Int).Set(n.Account.Index),
+		Vote:      mask,
+		Signature: sig,
+	}, nil
 }
 
 // redeemingWitnessRoot extracts the public RootHash input (Algorithm 1) from
@@ -721,38 +779,37 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		}
 	}
 
-	positions := make(map[string]int, len(batchIDs))
-	for i, id := range batchIDs {
-		positions[id.String()] = i
+	// Batch commitment C_batch = H(id_1 .. id_b), binding votes to this
+	// specific batch (paper SIV-D).
+	hfunc := hash.MIMC_BN254.New()
+	hfunc.Reset()
+	var commitmentElem fr.Element
+	for i := 0; i < len(batchIDs); i++ {
+		commitmentElem.SetBigInt(batchIDs[i])
+		hfunc.Write(commitmentElem.Marshal()[:])
 	}
+	batchCommitment := hfunc.Sum(nil)
+	batchCommitment = util.PadOrTrim(util.ModToBn254Bytes(batchCommitment), 32)
 
-	buildVoteMask := func(vote *BatchedWiVote) (*big.Int, error) {
-		if len(vote.WithdrawalReqIDs) < n.cfg.BatchSize || len(vote.Vote) < n.cfg.BatchSize {
-			return nil, fmt.Errorf("validator %d batch vote missing: need %d requests", vote.Index.Uint64(), n.cfg.BatchSize)
-		}
-		mask := big.NewInt(0)
-		for j := 0; j < n.cfg.BatchSize; j++ {
-			reqID := vote.WithdrawalReqIDs[j]
-			pos, ok := positions[reqID.String()]
-			if !ok {
-				return nil, fmt.Errorf("validator %d request mismatch: requestID=%s", vote.Index.Uint64(), reqID.String())
-			}
-			if vote.Vote[j] != nil && vote.Vote[j].Sign() != 0 {
-				mask.SetBit(mask, pos, 1)
-			}
-		}
-		return mask, nil
-	}
-
+	// Each validator computes and signs its own batch bitmask from its own
+	// recorded votes (paper SIV-D Step 14, Alg. 2 lines 12-13). The
+	// aggregator consumes the signed artifacts unmodified and never touches
+	// another validator's key (F-11).
+	signedVotes := make([]*SignedBatchVote, len(voteSlice))
 	voteMasks := make([]*big.Int, len(voteSlice))
 	voteCounts := make(map[string]int, len(voteSlice))
 	for i, vote := range voteSlice {
-		mask, err := buildVoteMask(vote)
+		node, err := n.nodeByAccountIndex(vote.Index)
 		if err != nil {
 			return nil, err
 		}
-		voteMasks[i] = mask
-		voteCounts[mask.String()]++
+		signed, err := node.SignBatchVote(batchIDs, roundID, batchCommitment)
+		if err != nil {
+			return nil, err
+		}
+		signedVotes[i] = signed
+		voteMasks[i] = new(big.Int).Set(signed.Vote)
+		voteCounts[signed.Vote.String()]++
 	}
 
 	if len(voteMasks) == 0 {
@@ -775,17 +832,6 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("no BFT quorum for vote mask: max=%d threshold=%d", majorityCount, threshold)
 	}
 
-	hfunc := hash.MIMC_BN254.New()
-	hfunc.Reset()
-	var commitmentElem fr.Element
-	for i := 0; i < len(batchIDs); i++ {
-		commitmentElem.SetBigInt(batchIDs[i])
-		hfunc.Write(commitmentElem.Marshal()[:])
-	}
-	batchCommitment := hfunc.Sum(nil)
-	batchCommitment = util.PadOrTrim(util.ModToBn254Bytes(batchCommitment), 32)
-
-	hfunc.Reset()
 	fmt.Printf("Length of WithdrawalReqIDs: %d\n", len(batchIDs))
 
 	fmt.Println("Sorted WithdrawalReqIDs:")
@@ -861,36 +907,13 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	// var tempPostState []byte
 	for i, vote := range voteSlice {
 
-		// 1. Find the node who signed this vote
-		node, err := n.nodeByAccountIndex(vote.Index)
-		if err != nil {
-			return nil, err
-		}
-
-		// 2. Rebuild the original message that was signed
-		// hfunc.Reset()
-		// hfunc.Write(vote.Index.Bytes())
-		// hfunc.Write(batchCommitment)
-		// hfunc.Write(big.NewInt(31).Bytes()) // TODO: fixme
-		// hfunc.Write(new(big.Int).SetInt64(int64(n.Oracle.RoundID)).Bytes())
-		// msg := hfunc.Sum(nil)
-
 		validatorVoteMask := new(big.Int).Set(voteMasks[i])
 
-		msg := hashBatchVoteFieldwise(
-			new(big.Int).Set(vote.Index),
-			new(big.Int).SetBytes(batchCommitment[:32]),
-			new(big.Int).Set(validatorVoteMask),
-			new(big.Int).Set(roundID),
-		)
+		// The validator's own signed batch bitmask (F-11): the aggregator
+		// attaches it to the witness unmodified.
+		vote.Signature = signedVotes[i].Signature
 
-		// 3. Re-sign the vote (this can be for validation or to force resync)
-		vote.Signature, err = node.privateKey.Sign(msg, hfunc)
-		if err != nil {
-			return nil, fmt.Errorf("sign the vote: %w", err)
-		}
-
-		// 4. Read validator account from state
+		// Read validator account from state
 		validatorAccount, err := n.state.ReadAccount(vote.Index.Uint64())
 		if err != nil {
 			return nil, fmt.Errorf("read validator account: %w", err)
@@ -1710,6 +1733,7 @@ func check(name string, val *big.Int) {
 		fmt.Printf("✅ %s is within scalar field\n  → value: %s\n", name, val.String())
 	}
 }
+
 // bftThreshold returns the paper's finalization threshold (SIV-A/SIV-D,
 // Alg. 2 line 19): f + 1 with f = floor((n-1)/3), i.e. at least one honest
 // supporting validator under the BFT assumption n = 3f + 1.
