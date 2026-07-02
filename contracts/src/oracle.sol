@@ -206,7 +206,6 @@ contract Oracle is MerkleTree {
         bytes32 nullifierHash
     ) external {
         require(users[msg.sender] == true, "address not registered");
-        // uint256 uniqueID = getRandomNumber();
         uint256 uniqueID = roundID;
 
         require(
@@ -306,7 +305,6 @@ contract Oracle is MerkleTree {
 
         update(hashAccount(replaced), path, leafIndex, depth);
 
-        // payable(accounts[toReplace.index]).transfer(toReplace.balance);
         address payable replacedAddr = payable(accounts[toReplace.index]);
         // Effects first: prevent the old owner from re-entering as the current owner
         accounts[toReplace.index] = msg.sender;
@@ -314,9 +312,7 @@ contract Oracle is MerkleTree {
         (bool ok, ) = replacedAddr.call{value: toReplace.balance}("");
         require(ok, "ETH_TRANSFER_FAILED");
 
-        // emit Replaced(msg.sender, accounts[toReplace.index]);
         emit Replaced(msg.sender, replacedAddr);
-        accounts[toReplace.index] = msg.sender;
     }
 
     function exit(
@@ -390,18 +386,6 @@ contract Oracle is MerkleTree {
     // endregion
 
     // region utils
-
-    function getRandomNumber() private view returns (uint256) {
-        uint256 id = uint256(
-            keccak256(
-                abi.encodePacked(block.timestamp, block.prevrandao, msg.sender)
-            )
-        );
-        if (id == 0) {
-            id += 1;
-        }
-        return id / 100;
-    }
 
     function hashAccount(Account memory account) public pure returns (uint256) {
         uint[] memory input = new uint[](4);
