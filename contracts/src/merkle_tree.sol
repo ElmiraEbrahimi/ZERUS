@@ -13,9 +13,13 @@ contract MerkleTree {
     uint256 private nextIndex;
     mapping(uint256 => uint256) private filledSubtrees;
 
+    // zeros() provides precomputed subtree hashes up to index 7, which bounds
+    // the supported depth to 8 levels (256 leaves).
+    uint256 public constant MAX_LEVELS = 8;
+
     constructor(uint256 _levels) {
-        require(_levels > 0, "_levels should be greater than zero");
-        require(_levels < 9, "_levels should be less than 8");
+        require(_levels > 0, "_levels must be greater than zero");
+        require(_levels <= MAX_LEVELS, "_levels must be at most 8");
 
         levels = _levels;
 

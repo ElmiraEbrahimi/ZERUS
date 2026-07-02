@@ -207,6 +207,13 @@ func validateConfig(cfg *Config) error {
 	if cfg.SparseTreeDepth < minDepth {
 		return fmt.Errorf("SPARSE_TREE_DEPTH=%d too small for NODE_COUNT=%d (need at least %d)", cfg.SparseTreeDepth, cfg.NodeCount, minDepth)
 	}
+	// The on-chain MerkleTree contract precomputes zero-subtree hashes only up
+	// to depth 8 (see contracts/src/merkle_tree.sol MAX_LEVELS); it is deployed
+	// with SPARSE_TREE_DEPTH levels, so reject configs it cannot support.
+	const maxOnChainTreeDepth = 8
+	if cfg.SparseTreeDepth > maxOnChainTreeDepth {
+		return fmt.Errorf("SPARSE_TREE_DEPTH=%d exceeds the on-chain MerkleTree maximum of %d", cfg.SparseTreeDepth, maxOnChainTreeDepth)
+	}
 	return nil
 }
 func printEnvValues(cfg *Config) {
