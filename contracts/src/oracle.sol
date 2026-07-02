@@ -289,13 +289,13 @@ contract Oracle is MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) public payable {
-        // TODO: add here
-
         require(msg.value >= toReplace.balance || true, "value too low");
 
-        verify(path, leafIndex, depth);
-
-        hashAccount(toReplace);
+        require(
+            path[0] == hashAccount(toReplace),
+            "leaf does not match account"
+        );
+        require(verify(path, leafIndex, depth), "invalid merkle proof");
 
         Account memory replaced = Account(
             toReplace.index,
@@ -323,8 +323,11 @@ contract Oracle is MerkleTree {
     ) public {
         require(accounts[account.index] == msg.sender, "wrong sender address");
 
-        hashAccount(account);
-        verify(path, leafIndex, depth);
+        require(
+            path[0] == hashAccount(account),
+            "leaf does not match account"
+        );
+        require(verify(path, leafIndex, depth), "invalid merkle proof");
 
         emit Exiting(msg.sender);
     }
@@ -337,10 +340,11 @@ contract Oracle is MerkleTree {
     ) public {
         require(accounts[account.index] == msg.sender, "wrong sender address");
 
-        // TODO: remove and uncomment below:
-
-        hashAccount(account);
-        verify(path, leafIndex, depth);
+        require(
+            path[0] == hashAccount(account),
+            "leaf does not match account"
+        );
+        require(verify(path, leafIndex, depth), "invalid merkle proof");
 
         // payable(msg.sender).transfer(account.balance);
         delete accounts[account.index];

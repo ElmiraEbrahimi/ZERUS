@@ -200,12 +200,13 @@ func validateConfig(cfg *Config) error {
 	if cfg.NodeCount < 1 {
 		return fmt.Errorf("NODE_COUNT must be >= 1")
 	}
-	minDepth := 0
-	for (1 << minDepth) < cfg.NodeCount {
-		minDepth++
-	}
-	if cfg.SparseTreeDepth < minDepth {
-		return fmt.Errorf("SPARSE_TREE_DEPTH=%d too small for NODE_COUNT=%d (need at least %d)", cfg.SparseTreeDepth, cfg.NodeCount, minDepth)
+	// The Aggregating circuit compiles Merkle paths of fixed length
+	// SPARSE_TREE_DEPTH+1, and the off-chain gnark-crypto tree over
+	// NODE_COUNT leaves only produces paths of that length (and roots that
+	// match the fixed-depth on-chain tree) when NODE_COUNT is exactly
+	// 2^SPARSE_TREE_DEPTH.
+	if cfg.NodeCount != (1 << cfg.SparseTreeDepth) {
+		return fmt.Errorf("NODE_COUNT=%d must equal 2^SPARSE_TREE_DEPTH (=%d)", cfg.NodeCount, 1<<cfg.SparseTreeDepth)
 	}
 	// The on-chain MerkleTree contract precomputes zero-subtree hashes only up
 	// to depth 8 (see contracts/src/merkle_tree.sol MAX_LEVELS); it is deployed

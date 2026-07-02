@@ -1117,6 +1117,10 @@ func (n *Node) RegisterValidatorTx() error {
 		log.Fatalf("failed to fetch pending nonce: %v", err)
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
+	// Stake the validator's collateral: the on-chain leaf is
+	// MiMC(index, pk.x, pk.y, msg.value), so the registered value must equal
+	// the off-chain account balance for Merkle proofs to verify (F-19).
+	trxOpts.Value = new(big.Int).Set(n.Account.Balance)
 
 	pk := gnark.PublicKeyToOraclePublicKey(n.Account.PublicKey)
 	tx, err := bcClient.RegisterValidator(trxOpts, big.NewInt(int64(n.ID)), *pk)

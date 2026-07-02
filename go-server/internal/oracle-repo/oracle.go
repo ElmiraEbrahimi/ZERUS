@@ -8,6 +8,7 @@ import (
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
 	"log"
+	"math/big"
 	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
@@ -97,9 +98,17 @@ func NewOracle(
 	o.SparseVK = sparseVK
 
 	fmt.Println("creating nodes...")
+	// Initial validator stake. Set on the shared account slice before any
+	// node builds its state so every node's state tree and the on-chain
+	// registration stake (msg.value) agree on the same balances (F-19).
+	const offeredAmount = 1000 // TODO(F-28): move to config
+	for i := range accounts {
+		if accounts[i] != nil {
+			accounts[i].Balance = big.NewInt(offeredAmount)
+		}
+	}
 	nodes := make(map[uint]*Node, nodesCount)
 	for i := 0; i < nodesCount; i++ {
-		offeredAmount := 1000 // TODO: change initial validator balance / move to cfg
 		nodes[uint(i)] = NewNode(cfg, ethClient, ipfsClient, o, uint(i), privteKeys[i], uint(offeredAmount), Validator, accounts)
 	}
 	o.Nodes = nodes

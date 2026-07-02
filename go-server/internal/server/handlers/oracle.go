@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -110,8 +111,19 @@ func (h *OracleHandler) RegisterValidators(w http.ResponseWriter, r *http.Reques
 	}
 
 	oracle := h.engine.Oracle
-	nodeIDs := make([]uint, 0, len(oracle.Nodes))
-	for id, node := range oracle.Nodes {
+	// Register in ascending node-ID order: the contract assigns leaf indices
+	// by insertion order, and the off-chain state tree places account i at
+	// position i, so the on-chain and off-chain trees only agree when
+	// registration is deterministic (F-19).
+	ids := make([]uint, 0, len(oracle.Nodes))
+	for id := range oracle.Nodes {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	nodeIDs := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		node := oracle.Nodes[id]
 		if node == nil {
 			continue
 		}

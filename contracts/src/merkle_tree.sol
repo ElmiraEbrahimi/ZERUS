@@ -79,10 +79,8 @@ contract MerkleTree {
         uint256 leafIndex,
         uint256 depth
     ) internal {
-        // Call verify with leafIndex and depth
-        verify(path, leafIndex, depth);
+        require(verify(path, leafIndex, depth), "invalid merkle proof");
         path[0] = leaf;
-        // Call computeRootFromPath with leafIndex and depth
         root = computeRootFromPath(path, leafIndex, depth);
     }
 
