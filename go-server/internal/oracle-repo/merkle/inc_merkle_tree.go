@@ -91,6 +91,14 @@ func (tree *IncrementalMerkleTree) AddLeafValidator(commitmentHash []byte) (uint
 	return uint64(len(tree.Leaves) - 1), commitmentHash, currentHash, nil
 }
 
+// LatestRoot returns the most recent root, or nil if the tree is empty.
+func (tree *IncrementalMerkleTree) LatestRoot() []byte {
+	if len(tree.Roots) == 0 {
+		return nil
+	}
+	return tree.Roots[len(tree.Roots)-1]
+}
+
 // Generate the Merkle proof path for a given leaf index.
 func (tree *IncrementalMerkleTree) GetProofPath(index uint64) ([]byte, [][]byte, error) {
 	if index >= uint64(len(tree.Leaves)) {

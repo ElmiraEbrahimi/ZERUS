@@ -367,6 +367,18 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 	return latestIPFSHash, nil
 }
 
+// isPublishedCommitmentRoot checks the Gateway's record of commitment roots
+// (paper SIV-E Steps 6-7).
+func (u *User) isPublishedCommitmentRoot(root *big.Int) (bool, error) {
+	oracleContractAddr := common.HexToAddress(u.cfg.OracleContractAddress)
+	bcClient, err := bc.NewOracle(oracleContractAddr, u.ethClient)
+	if err != nil {
+		return false, fmt.Errorf("create contract client instance: %w", err)
+	}
+	callOpts := &bind.CallOpts{Context: context.Background()}
+	return bcClient.IsPublishedCommitmentRoot(callOpts, root)
+}
+
 func (u *User) BurnTx() (string, string, error) {
 	log.Printf("user=%v is burning...", u.Name)
 	preBurnBalance, preClaimBalance, err := u.GetBalance()
@@ -485,6 +497,17 @@ func (u *User) WithdrawTx() (string, error) {
 	merkleRoot, proofPath, err := tree.GetProofPath(proofIndex)
 	if err != nil {
 		return "", fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
+	}
+
+	// The Gateway must have recorded this commitment root (paper SIV-E
+	// Steps 6-7); otherwise the fetched DFS content cannot be trusted as a
+	// basis for the Redeeming proof.
+	rootPublished, err := u.isPublishedCommitmentRoot(new(big.Int).SetBytes(merkleRoot))
+	if err != nil {
+		return "", fmt.Errorf("failed to validate commitment root (user=%v): %w", u.Name, err)
+	}
+	if !rootPublished {
+		return "", fmt.Errorf("DFS commitment root not recorded by the gateway (user=%v root=%s)", u.Name, common.BytesToHash(merkleRoot).Hex())
 	}
 
 	var witness merkleproof.MerkleProofCircuit

@@ -313,7 +313,13 @@ func (n *Node) Start() {
 						n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
 						fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
 						latestIPFSHash, _ := n.UpdateIPFS()
-						n.updateLatestIPFSHashTx(latestIPFSHash)
+						// Anchor the finalized commitment root with the DFS
+						// reference on-chain (paper SIV-E Steps 6-7).
+						root := new(big.Int)
+						if r := n.IncMerkleTree.LatestRoot(); r != nil {
+							root.SetBytes(r)
+						}
+						n.publishCommitmentRootTx(root, latestIPFSHash)
 						for _, key := range keys {
 							delete(n.IncVotes, key)
 						}
@@ -362,9 +368,23 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 		}
 	}
 
+	// The Redeeming proof must be against a commitment root the Gateway has
+	// recorded (paper SIV-E Steps 6-7).
+	witnessRoot, rootErr := redeemingWitnessRoot(publicWitness)
+	rootPublished := false
+	if rootErr == nil {
+		rootPublished, rootErr = n.isPublishedCommitmentRoot(witnessRoot)
+	}
+
 	var isApproved *big.Int
 	if n.IsNullifierSpent(nullifierKey) {
 		fmt.Printf("rejecting claim: nullifier already spent (node=%v nullifier=%s)\n", n.ID, nullifierKey)
+		isApproved = big.NewInt(0)
+	} else if rootErr != nil {
+		fmt.Printf("rejecting claim: cannot validate commitment root (node=%v): %v\n", n.ID, rootErr)
+		isApproved = big.NewInt(0)
+	} else if !rootPublished {
+		fmt.Printf("rejecting claim: commitment root not recorded by the gateway (node=%v root=%s)\n", n.ID, witnessRoot)
 		isApproved = big.NewInt(0)
 	} else if err := groth16.Verify(proof, n.Oracle.IncVK, publicWitness); err != nil {
 		fmt.Printf("failed to verify claim proof (node=%v): %v\n", n.ID, err)
@@ -398,6 +418,28 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 	}
 
 	return &wivote, nil
+}
+
+// redeemingWitnessRoot extracts the public RootHash input (Algorithm 1) from
+// a Redeeming-proof public witness.
+func redeemingWitnessRoot(w witness.Witness) (*big.Int, error) {
+	vec, ok := w.Vector().(fr.Vector)
+	if !ok || len(vec) == 0 {
+		return nil, fmt.Errorf("unexpected public witness layout")
+	}
+	return vec[0].BigInt(new(big.Int)), nil
+}
+
+// isPublishedCommitmentRoot checks the Gateway's record of commitment roots
+// (paper SIV-E Steps 6-7): claims are only accepted against recorded roots.
+func (n *Node) isPublishedCommitmentRoot(root *big.Int) (bool, error) {
+	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
+	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
+	if err != nil {
+		return false, fmt.Errorf("create contract client instance: %w", err)
+	}
+	callOpts := &bind.CallOpts{Context: context.Background()}
+	return bcClient.IsPublishedCommitmentRoot(callOpts, root)
 }
 
 // endregion
@@ -1310,8 +1352,11 @@ func decodeRevertData(data []byte) string {
 	}
 }
 
-func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
-	fmt.Printf("updating latest ipfs hash (validator=%v) ...\n", n.ID)
+// publishCommitmentRootTx reports the finalized commitment-tree root and the
+// DFS object identifier to the Gateway (paper SIV-E Steps 6-7). Only the
+// current round aggregator's transaction is accepted on-chain.
+func (n *Node) publishCommitmentRootTx(root *big.Int, dfsRef string) error {
+	fmt.Printf("publishing commitment root (validator=%v root=%s) ...\n", n.ID, root)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
 	if err != nil {
@@ -1327,18 +1372,18 @@ func (n *Node) updateLatestIPFSHashTx(latestIPFSHash string) error {
 	}
 	trxOpts.Nonce = big.NewInt(int64(pendingNonce))
 
-	tx, err := bcClient.UpdateLatestIPFSHash(trxOpts, latestIPFSHash)
+	tx, err := bcClient.PublishCommitmentRoot(trxOpts, root, dfsRef)
 	if err != nil {
-		log.Fatalf("call updateLatestIPFSHash() function: %v", err)
+		log.Fatalf("call publishCommitmentRoot() function: %v", err)
 	}
 
 	receipt, err := bind.WaitMined(context.Background(), n.ethClient, tx)
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	bc.LogTxReceipt("update latest ipfs hash", tx, receipt)
+	bc.LogTxReceipt("publish commitment root", tx, receipt)
 	if receipt.Status == 1 {
-		fmt.Printf("successfully updated ipfs hash (node=%v)\n", n.ID)
+		fmt.Printf("successfully published commitment root (node=%v)\n", n.ID)
 	} else {
 		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
 	}

@@ -40,7 +40,15 @@ contract Oracle is MerkleTree {
     uint256 seedX;
     uint256 seedY;
 
+    // Commitment-tree anchoring (paper SIV-E Steps 6-7): after threshold
+    // agreement the aggregator publishes the appended leaves to the DFS and
+    // reports the object identifier together with the finalized commitment
+    // root, so any mismatch is publicly detectable from the recorded values.
     string latestIPFSHash;
+    uint256 private latestCommitmentRoot;
+    uint256 private commitmentEpoch;
+    mapping(uint256 => uint256) public commitmentRootByEpoch;
+    mapping(uint256 => bool) private publishedCommitmentRoots;
 
     mapping(address => bool) private users;
     mapping(address => uint) private tokenBurnBalances;
@@ -115,6 +123,12 @@ contract Oracle is MerkleTree {
         uint256 uniqueID,
         address recipient,
         bytes32 nullifierHash
+    );
+
+    event CommitmentRootPublished(
+        uint256 indexed epoch,
+        uint256 root,
+        string dfsRef
     );
 
     event Replaced(address indexed sender, address indexed replaced);
@@ -420,14 +434,44 @@ contract Oracle is MerkleTree {
 
     // endregion
 
-    // region ipfs
+    // region commitment root / dfs
 
-    function updateLatestIPFSHash(string memory ipfsHash) external {
-        latestIPFSHash = ipfsHash;
+    /// @notice Record the finalized commitment-tree root together with the
+    /// DFS object identifier (paper SIV-E Steps 6-7). Only the current round
+    /// aggregator may publish; claims are only accepted against recorded
+    /// roots.
+    function publishCommitmentRoot(
+        uint256 root,
+        string memory dfsRef
+    ) external {
+        require(
+            validators[aggregator] == msg.sender,
+            "not current aggregator"
+        );
+        commitmentEpoch++;
+        commitmentRootByEpoch[commitmentEpoch] = root;
+        publishedCommitmentRoots[root] = true;
+        latestCommitmentRoot = root;
+        latestIPFSHash = dfsRef;
+        emit CommitmentRootPublished(commitmentEpoch, root, dfsRef);
     }
 
     function viewLatestIPFSHash() public view returns (string memory) {
         return latestIPFSHash;
+    }
+
+    function viewLatestCommitmentRoot()
+        public
+        view
+        returns (uint256, uint256)
+    {
+        return (commitmentEpoch, latestCommitmentRoot);
+    }
+
+    function isPublishedCommitmentRoot(
+        uint256 root
+    ) public view returns (bool) {
+        return publishedCommitmentRoots[root];
     }
 
     // endregion

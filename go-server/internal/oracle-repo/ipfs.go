@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"l2alchemy/internal/oracle-repo/merkle"
+	"math/big"
 )
 
 type IPFSContent struct {
@@ -73,7 +74,13 @@ func (n *Node) PersistSpentNullifiers() error {
 	if err != nil {
 		return err
 	}
-	return n.updateLatestIPFSHashTx(latestHash)
+	// Re-anchor the (unchanged) commitment root with the new DFS reference
+	// so users always resolve the pointer the Gateway has recorded (F-22).
+	root := new(big.Int)
+	if r := content.IncMerkleTree.LatestRoot(); r != nil {
+		root.SetBytes(r)
+	}
+	return n.publishCommitmentRootTx(root, latestHash)
 }
 
 func (n *Node) UpdateIPFS() (string, error) {
