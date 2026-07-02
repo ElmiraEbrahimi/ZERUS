@@ -29,8 +29,11 @@ func NodeSum(api frontend.API, h mimc.MiMC, a, b frontend.Variable) frontend.Var
 
 // MerkleProof Methods
 
-// VerifyProof for MerkleProof
-func (mp *MerkleProofW) VerifyProof(api frontend.API, h mimc.MiMC, leaf frontend.Variable) {
+// VerifyProof asserts Merkle membership against expectedRoot. The expected
+// root is a parameter (not the free per-witness RootHash) so the Aggregating
+// circuit can thread the running intermediate state root R_int across
+// validators (paper Alg. 2 lines 8/11/17/22).
+func (mp *MerkleProofW) VerifyProof(api frontend.API, h mimc.MiMC, leaf frontend.Variable, expectedRoot frontend.Variable) {
 	depth := len(mp.Path) - 1
 	sum := LeafSum(api, h, mp.Path[0])
 
@@ -45,10 +48,10 @@ func (mp *MerkleProofW) VerifyProof(api frontend.API, h mimc.MiMC, leaf frontend
 		sum = NodeSum(api, h, d1, d2)
 	}
 
-	// Check if the calculated root matches the provided root
+	// Check if the calculated root matches the expected root
 	api.Println("[Circuit_voting verify proof] calculated rootHash", sum)
-	api.Println("[out_voting verify proof] calculated rootHash", mp.RootHash)
-	api.AssertIsEqual(sum, mp.RootHash)
+	api.Println("[out_voting verify proof] expected rootHash", expectedRoot)
+	api.AssertIsEqual(sum, expectedRoot)
 }
 
 // ComputeRootFromPath for MerkleProof

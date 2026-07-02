@@ -136,7 +136,9 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 
 	api.AssertIsEqual(hFunc.Sum(), c.Aggregator.MerkleProof.Path[0])
 	hFunc.Reset()
-	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index)
+	// The aggregator's membership seeds the R_int chain from the pre-round
+	// state root (paper Alg. 2 line 8).
+	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index, c.Aggregator.MerkleProof.RootHash)
 	api.Println("[batching_circuit] Aggregator Verified Merkle proof...")
 	// Reward the aggregator for the batch
 	hFunc.Reset()
@@ -187,7 +189,10 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		api.Println(validator.Index, "Assertion passed")
 
 		hFunc.Reset()
-		validator.MerkleProof.VerifyProof(api, hFunc, validator.Index)
+		// Thread the intermediate state root (paper Alg. 2 lines 11/17):
+		// every validator's membership is verified against the running
+		// R_int, not a free per-validator witness root.
+		validator.MerkleProof.VerifyProof(api, hFunc, validator.Index, intermediateRoot)
 		api.Println(validator.Index, "[batching_circuit] Validator Verified Merkle proof succssed...")
 
 		////////////////////////////////////////////////////////////////////////////////////////////////////
