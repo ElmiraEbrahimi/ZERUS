@@ -488,6 +488,70 @@ func (u *User) BurnTx() (string, string, error) {
 	return tx.Hash().Hex(), common.BytesToHash(commitmentHashBytes).Hex(), nil
 }
 
+// claimWitnessData is the DFS-derived data needed to build a Redeeming
+// proof for one burn commitment.
+type claimWitnessData struct {
+	proofIndex uint64
+	depth      int
+	merkleRoot []byte
+	proofPath  [][]byte
+}
+
+// fetchClaimWitnessData resolves the Gateway's DFS pointer, locates the burn
+// commitment in the published content, derives the Merkle witness, and
+// checks that the Gateway has recorded the corresponding commitment root
+// (paper SIV-E Steps 6-8). All failures are potentially transient right
+// after a burn (the aggregator's DFS publication and root-recording
+// transaction may still be in flight), so callers may retry.
+func (u *User) fetchClaimWitnessData(commitmentHash []byte) (*claimWitnessData, error) {
+	latestIPFSHash, err := u.getLatestIPFSHashView()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get the latest ipfs hash (user=%v): %v", u.Name, err)
+	}
+	content, err := u.IPFSClient.Download(latestIPFSHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download from ipfs (user=%v): %v", u.Name, err)
+	}
+	ipfsContent, err := oracle.DeserializeIPFSContent(content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize ipfs content (user=%v): %v", u.Name, err)
+	}
+	// search ipfs for the commitment hash:
+	incVote, ok := ipfsContent.CommitmentHashIncVote[string(commitmentHash)]
+	if !ok {
+		return nil, fmt.Errorf("commitment hash not found in ipfs (user=%v hash=%s)", u.Name, common.BytesToHash(commitmentHash).Hex())
+	}
+	tree := ipfsContent.IncMerkleTree
+	if reflect.DeepEqual(tree, merkle.IncrementalMerkleTree{}) {
+		return nil, fmt.Errorf("empty inc merkle tree in ipfs (user=%v)", u.Name)
+	}
+
+	proofIndex := incVote.IncTreeIndex
+	depth := ipfsContent.IncMerkleTree.Depth
+	merkleRoot, proofPath, err := tree.GetProofPath(proofIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
+	}
+
+	// The Gateway must have recorded this commitment root (paper SIV-E
+	// Steps 6-7); otherwise the fetched DFS content cannot be trusted as a
+	// basis for the Redeeming proof.
+	rootPublished, err := u.isPublishedCommitmentRoot(new(big.Int).SetBytes(merkleRoot))
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate commitment root (user=%v): %w", u.Name, err)
+	}
+	if !rootPublished {
+		return nil, fmt.Errorf("DFS commitment root not recorded by the gateway (user=%v root=%s)", u.Name, common.BytesToHash(merkleRoot).Hex())
+	}
+
+	return &claimWitnessData{
+		proofIndex: proofIndex,
+		depth:      depth,
+		merkleRoot: merkleRoot,
+		proofPath:  proofPath,
+	}, nil
+}
+
 func (u *User) WithdrawTx() (string, error) {
 	preBurnBalance, preClaimBalance, err := u.GetBalance()
 	if err != nil {
@@ -503,48 +567,32 @@ func (u *User) WithdrawTx() (string, error) {
 	}
 	// Claim the oldest unclaimed burn.
 	note := u.pendingBurns[0]
-	// fetch from ipfs:
-	latestIPFSHash, err := u.getLatestIPFSHashView()
-	if err != nil {
-		return "", fmt.Errorf("failed to get the latest ipfs hash (user=%v): %v", u.Name, err)
-	}
-	content, err := u.IPFSClient.Download(latestIPFSHash)
-	if err != nil {
-		return "", fmt.Errorf("failed to download from ipfs (user=%v): %v", u.Name, err)
-	}
-	ipfsContent, err := oracle.DeserializeIPFSContent(content)
-	if err != nil {
-		return "", fmt.Errorf("failed to deserialize ipfs content (user=%v): %v", u.Name, err)
-	}
-	// search ipfs for the commitment hash:
-	incVote, ok := ipfsContent.CommitmentHashIncVote[string(note.CommitmentHashBytes)]
-	if !ok {
-		return "", fmt.Errorf("commitment hash not found in ipfs (user=%v hash=%s)", u.Name, common.BytesToHash(note.CommitmentHashBytes).Hex())
-	}
-	tree := ipfsContent.IncMerkleTree
-	if reflect.DeepEqual(tree, merkle.IncrementalMerkleTree{}) {
-		return "", fmt.Errorf("empty inc merkle tree in ipfs (user=%v)", u.Name)
+
+	// The aggregator publishes the appended leaves to the DFS and records
+	// the finalized root on the Gateway shortly after the burn batch fills
+	// (paper SIV-E Steps 6-7). A withdraw issued right after the burns can
+	// race that publication, so retry briefly instead of failing hard.
+	const (
+		fetchAttempts = 20
+		fetchBackoff  = 3 * time.Second
+	)
+	var wd *claimWitnessData
+	for attempt := 1; ; attempt++ {
+		wd, err = u.fetchClaimWitnessData(note.CommitmentHashBytes)
+		if err == nil {
+			break
+		}
+		if attempt >= fetchAttempts {
+			return "", fmt.Errorf("claim data unavailable after %d attempts (user=%v): %w", fetchAttempts, u.Name, err)
+		}
+		log.Printf("claim data not ready yet (attempt %d/%d, user=%v): %v", attempt, fetchAttempts, u.Name, err)
+		time.Sleep(fetchBackoff)
 	}
 
-	// setup to generate:
-
-	proofIndex := incVote.IncTreeIndex
-	depth := ipfsContent.IncMerkleTree.Depth
-	merkleRoot, proofPath, err := tree.GetProofPath(proofIndex)
-	if err != nil {
-		return "", fmt.Errorf("failed to get proof path from inc merkle tree (user=%v): %v", u.Name, err)
-	}
-
-	// The Gateway must have recorded this commitment root (paper SIV-E
-	// Steps 6-7); otherwise the fetched DFS content cannot be trusted as a
-	// basis for the Redeeming proof.
-	rootPublished, err := u.isPublishedCommitmentRoot(new(big.Int).SetBytes(merkleRoot))
-	if err != nil {
-		return "", fmt.Errorf("failed to validate commitment root (user=%v): %w", u.Name, err)
-	}
-	if !rootPublished {
-		return "", fmt.Errorf("DFS commitment root not recorded by the gateway (user=%v root=%s)", u.Name, common.BytesToHash(merkleRoot).Hex())
-	}
+	proofIndex := wd.proofIndex
+	depth := wd.depth
+	merkleRoot := wd.merkleRoot
+	proofPath := wd.proofPath
 
 	var witness merkleproof.MerkleProofCircuit
 
