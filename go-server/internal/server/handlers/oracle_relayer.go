@@ -181,6 +181,15 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 			log.Printf("oracle relayer: message already consumed (l2_tx=%s)", txHash.Hex())
 			return
 		}
+		// A deterministic on-chain revert (e.g. "unknown root", "validator
+		// mismatch", "withdraw delay not elapsed") cannot succeed by
+		// retrying the same message against the same state: give up once
+		// and leave the message for a later replay (the Hub deduplicates by
+		// message hash, so re-relaying after the state changes is safe).
+		if strings.Contains(errMsg, "execution reverted") || strings.Contains(errMsg, "revert") {
+			log.Printf("oracle relayer: finalizeFromL2 reverted, not retrying (l2_tx=%s): %v", txHash.Hex(), err)
+			return
+		}
 		log.Printf("oracle relayer: finalizeFromL2 failed (attempt=%d), retrying: %v", attempt, err)
 		time.Sleep(l2ToL1RelayPollInterval)
 	}
