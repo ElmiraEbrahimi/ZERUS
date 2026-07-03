@@ -149,6 +149,26 @@ make configure-l2-messenger # set L1 messenger on L2 (if needed)
 make server      # run the Go API server
 ```
 
+## Tests and Evaluation
+
+```sh
+cd contracts && forge test        # Gateway conformance tests
+cd go-server && go test ./...     # Go unit tests (thresholds, batching, ordering, crypto vectors)
+```
+
+To regenerate the paper's §VI evaluation data (Tables I–II, Figures 5–8),
+run the sweep against a running local stack (`make up-deploy`):
+
+```sh
+./scripts/run-evaluation.sh                 # 50 trials, n ∈ {4..128}, b ∈ {1,5,10,15}
+./scripts/run-evaluation.sh -r 10 -n "4 8" -b "1 5"   # smaller sweep
+```
+
+Each configuration's raw CSV logs are copied to
+`eval-results/<timestamp>/n{N}_b{B}/` and aggregated into
+`eval-results/<timestamp>/summary.csv` (per-metric count/mean/std by
+configuration and measurement source).
+
 ## L1/L2 Messaging Demo
 
 Set `L1_MAILBOX_ADDRESS` to your zkSync L1 mailbox/bridgehub contract before deploying.

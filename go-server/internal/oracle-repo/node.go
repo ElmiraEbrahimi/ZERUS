@@ -774,15 +774,9 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	// claim identifiers [r*b, (r+1)*b - 1]. The Gateway assigns sequential
 	// IDs, so the sorted batch must form that window; its round identifier is
 	// id/b.
-	b := big.NewInt(int64(n.cfg.BatchSize))
-	roundID := new(big.Int).Div(batchIDs[0], b)
-	windowBase := new(big.Int).Mul(roundID, b)
-	for i, id := range batchIDs {
-		expected := new(big.Int).Add(windowBase, big.NewInt(int64(i)))
-		if id.Cmp(expected) != 0 {
-			return nil, fmt.Errorf("batch does not form round window [%s..%s]: position %d has id %s, want %s",
-				windowBase, new(big.Int).Add(windowBase, big.NewInt(int64(n.cfg.BatchSize-1))), i, id, expected)
-		}
+	roundID, err := validateRoundWindow(batchIDs, n.cfg.BatchSize)
+	if err != nil {
+		return nil, err
 	}
 
 	// Batch commitment C_batch = H(id_1 .. id_b), binding votes to this
@@ -1749,4 +1743,28 @@ func bftThreshold(nValidators int) int {
 	}
 	f := (nValidators - 1) / 3
 	return f + 1
+}
+
+// validateRoundWindow enforces the deterministic batching rule (paper
+// SIV-D): round r contains exactly the claim identifiers
+// [r*b, (r+1)*b - 1]. The ascending batch must form that window; the round
+// identifier is id/b.
+func validateRoundWindow(batchIDs []*big.Int, batchSize int) (*big.Int, error) {
+	if batchSize <= 0 {
+		return nil, fmt.Errorf("invalid batch size %d", batchSize)
+	}
+	if len(batchIDs) != batchSize {
+		return nil, fmt.Errorf("batch size mismatch: expected %d got %d", batchSize, len(batchIDs))
+	}
+	b := big.NewInt(int64(batchSize))
+	roundID := new(big.Int).Div(batchIDs[0], b)
+	windowBase := new(big.Int).Mul(roundID, b)
+	for i, id := range batchIDs {
+		expected := new(big.Int).Add(windowBase, big.NewInt(int64(i)))
+		if id.Cmp(expected) != 0 {
+			return nil, fmt.Errorf("batch does not form round window [%s..%s]: position %d has id %s, want %s",
+				windowBase, new(big.Int).Add(windowBase, big.NewInt(int64(batchSize-1))), i, id, expected)
+		}
+	}
+	return roundID, nil
 }
