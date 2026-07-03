@@ -39,7 +39,20 @@ down:
 	cd local-setup && ./clear.sh
 
 .PHONY: deploy
-deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-mimc deploy-merkle-tree deploy-oracle deploy-messengers deploy-l1hub-if-configured
+deploy: run-index reset-local-state deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-mimc deploy-merkle-tree deploy-oracle deploy-messengers deploy-l1hub-if-configured
+
+.PHONY: reset-local-state
+# A fresh deployment invalidates all locally persisted protocol state:
+# user burn notes reference the previous chain's commitment tree, and the
+# simulated DFS index is rebuilt per deployment. Stale files would leak
+# burns from an old chain into the new run and break claims.
+reset-local-state:
+	$(ANNOUNCE_TARGET)
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	for f in "$${USER_STATE_PATH:-.user_state.gob}" "$${IPFS_SIM_DATA_PATH:-.ipfs_sim_data.gob}"; do \
+		rm -f "$$f" "go-server/$$f"; \
+	done; \
+	echo "Removed stale local protocol state (user burn notes + simulated DFS)"
 
 .PHONY: deploy-counter deploy-l2-messenger deploy-l1-messenger configure-l2-messenger deploy-messengers deploy-messengers-if-configured abigen-messengers ensure-l1-mailbox
 deploy-counter:
