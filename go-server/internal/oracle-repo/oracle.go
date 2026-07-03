@@ -101,10 +101,14 @@ func NewOracle(
 	// Initial validator stake. Set on the shared account slice before any
 	// node builds its state so every node's state tree and the on-chain
 	// registration stake (msg.value) agree on the same balances (F-19).
-	const offeredAmount = 1000 // TODO(F-28): move to config
+	// Configurable for the evaluation sweeps (F-28).
+	offeredAmount := cfg.InitialValidatorStake
+	if offeredAmount <= 0 {
+		offeredAmount = 1000
+	}
 	for i := range accounts {
 		if accounts[i] != nil {
-			accounts[i].Balance = big.NewInt(offeredAmount)
+			accounts[i].Balance = big.NewInt(int64(offeredAmount))
 		}
 	}
 	nodes := make(map[uint]*Node, nodesCount)

@@ -878,7 +878,10 @@ func (l *L2ContractEventSubscriber) applyClaimSubmittedEvent(evt *eth.OracleClai
 		log.Printf("node %d received claim event", node.ID)
 		wiVote, err := node.VerifyClaim(evt)
 		if err != nil {
-			log.Fatalf("failed verifying claim: %v", err)
+			// A single node's verification failure must not kill the whole
+			// committee process (F-28); the node simply casts no vote.
+			log.Printf("node %d failed verifying claim: %v", node.ID, err)
+			continue
 		}
 		node.Oracle.PublishWiVote(wiVote)
 	}

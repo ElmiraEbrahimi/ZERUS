@@ -65,6 +65,9 @@ type Config struct {
 	// inserting burns into the commitment tree (paper SIV-E / SVII-C;
 	// F-21), expressed as a block-depth confirmation for the local stack.
 	BurnConfirmationDepth int `env:"BURN_CONFIRMATION_DEPTH" default:"0"`
+	// InitialValidatorStake is each simulated validator's starting stake /
+	// state-tree balance, configurable for the evaluation sweeps (F-28).
+	InitialValidatorStake int `env:"INITIAL_VALIDATOR_STAKE" default:"1000"`
 	// Source rollup profile (paper SV: two independent zkSync Era
 	// instances; F-20). When set, burns are observed on the source chain's
 	// Gateway while claims run against the local (destination) Gateway.

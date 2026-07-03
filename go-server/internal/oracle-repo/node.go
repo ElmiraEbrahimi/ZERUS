@@ -254,7 +254,10 @@ func (n *Node) Start() {
 						for uniqueReqID := range n.WiVotes {
 							id, ok := new(big.Int).SetString(uniqueReqID, 10)
 							if !ok {
-								panic(fmt.Errorf("invalid wiVote request id: %q", uniqueReqID))
+								// Skip malformed ids instead of killing the
+								// committee process (F-28).
+								fmt.Printf("node %d: invalid wiVote request id %q, skipping\n", n.ID, uniqueReqID)
+								continue
 							}
 							reqIDs = append(reqIDs, id)
 						}
@@ -265,7 +268,10 @@ func (n *Node) Start() {
 							// aggregator wiVote process:
 							err := n.AggregatorProcessWiVote(id.String())
 							if err != nil {
-								panic(fmt.Errorf("failed to process wiVote: %v", err))
+								// Log and continue; the request stays queued
+								// for a later round (F-28).
+								fmt.Printf("node %d: failed to process wiVote %s: %v\n", n.ID, id, err)
+								continue
 							}
 						}
 					}
