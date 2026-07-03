@@ -117,7 +117,15 @@ contract L1Hub {
         bool exitFinalized;
         bool withdrawn;
         bool importRequested;
+        // Timestamp of exit finalization; withdrawals are only released
+        // after the waiting period (paper SIV-C, F-04).
+        uint256 exitFinalizedAt;
     }
+
+    /// @notice Waiting period between a finalized exit and the stake
+    /// release (paper SIV-C): prevents a validator from replacing another
+    /// and immediately withdrawing.
+    uint256 public withdrawDelay;
 
     mapping(uint256 => ValidatorRecord) public validators;
     uint256[] public pendingValidatorIds;
@@ -181,13 +189,24 @@ contract L1Hub {
         _;
     }
 
-    constructor(address mailboxAddress, address l2OracleAddress, uint256 l2ChainId_, bool useBridgehub_) {
+    constructor(
+        address mailboxAddress,
+        address l2OracleAddress,
+        uint256 l2ChainId_,
+        bool useBridgehub_,
+        uint256 withdrawDelay_
+    ) {
         require(mailboxAddress != address(0), "mailbox required");
         owner = msg.sender;
         mailbox = IZkSyncMailbox(mailboxAddress);
         l2Oracle = l2OracleAddress;
         l2ChainId = l2ChainId_;
         useBridgehub = useBridgehub_;
+        withdrawDelay = withdrawDelay_;
+    }
+
+    function setWithdrawDelay(uint256 withdrawDelay_) external onlyOwner {
+        withdrawDelay = withdrawDelay_;
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
@@ -216,7 +235,8 @@ contract L1Hub {
             active: false,
             exitFinalized: false,
             withdrawn: false,
-            importRequested: false
+            importRequested: false,
+            exitFinalizedAt: 0
         });
 
         pendingValidatorIds.push(validatorID);
@@ -358,6 +378,7 @@ contract L1Hub {
             require(record.validatorAddr == validatorAddr, "validator mismatch");
 
             record.exitFinalized = true;
+            record.exitFinalizedAt = block.timestamp;
             emit ExitFinalized(validatorID, validatorAddr);
             return;
         }
@@ -371,12 +392,22 @@ contract L1Hub {
             require(record.validatorAddr == validatorAddr, "validator mismatch");
             require(record.exitFinalized, "exit not finalized");
             require(!record.withdrawn, "already withdrawn");
-            require(amount == record.stake, "amount mismatch");
+            // Waiting period before the stake is released (paper SIV-C,
+            // F-04).
+            require(
+                block.timestamp >= record.exitFinalizedAt + withdrawDelay,
+                "withdraw delay not elapsed"
+            );
+            // The reported amount is the validator's L2 balance (stake plus
+            // accrued rewards/penalties); the Hub releases the L1-locked
+            // stake.
+            require(amount >= record.stake, "amount below locked stake");
 
             record.withdrawn = true;
-            (bool sent, ) = payable(validatorAddr).call{value: amount}("");
+            uint256 released = record.stake;
+            (bool sent, ) = payable(validatorAddr).call{value: released}("");
             require(sent, "eth transfer failed");
-            emit WithdrawalFinalized(validatorID, validatorAddr, amount);
+            emit WithdrawalFinalized(validatorID, validatorAddr, released);
             return;
         }
 
