@@ -56,17 +56,32 @@ type User struct {
 
 	Name string `json:"name"`
 
-	circuit             *merkleproof.MerkleProofCircuit
-	commitmentHashBytes []byte
-	nullifierBytes      []byte
-	nullifierHashBytes  []byte
-	secretBytes         []byte
-	destinationIDBytes  []byte
+	circuit *merkleproof.MerkleProofCircuit
+	// pendingBurns queues the secrets of burns that have not been claimed
+	// yet, oldest first. Each burn is claimable exactly once (paper SII-C),
+	// so a claim consumes the front of the queue; keeping only the latest
+	// burn would make every earlier burn unclaimable and every repeated
+	// claim reuse the same nullifier (which the committee rejects).
+	pendingBurns []BurnNote
 
 	Account *gnark.Account
 }
 
+// BurnNote holds the private parameters of a single burn commitment
+// C = H(n_rd || s_rd || d_dst); it is consumed by the claim that spends it.
+type BurnNote struct {
+	CommitmentHashBytes []byte
+	NullifierBytes      []byte
+	NullifierHashBytes  []byte
+	SecretBytes         []byte
+	DestinationIDBytes  []byte
+}
+
 type persistedUserState struct {
+	PendingBurns []BurnNote
+
+	// Legacy single-burn fields, kept so state files written before the
+	// pending-burns queue still load (migrated as one queued note).
 	CommitmentHashBytes []byte
 	NullifierBytes      []byte
 	NullifierHashBytes  []byte
@@ -229,11 +244,17 @@ func (u *User) loadState() error {
 		return err
 	}
 
-	u.commitmentHashBytes = state.CommitmentHashBytes
-	u.nullifierBytes = state.NullifierBytes
-	u.nullifierHashBytes = state.NullifierHashBytes
-	u.secretBytes = state.SecretBytes
-	u.destinationIDBytes = state.DestinationIDBytes
+	u.pendingBurns = state.PendingBurns
+	if len(u.pendingBurns) == 0 && len(state.CommitmentHashBytes) > 0 {
+		// Migrate a legacy single-burn state file into the queue.
+		u.pendingBurns = []BurnNote{{
+			CommitmentHashBytes: state.CommitmentHashBytes,
+			NullifierBytes:      state.NullifierBytes,
+			NullifierHashBytes:  state.NullifierHashBytes,
+			SecretBytes:         state.SecretBytes,
+			DestinationIDBytes:  state.DestinationIDBytes,
+		}}
+	}
 
 	return nil
 }
@@ -258,11 +279,7 @@ func (u *User) saveState() error {
 
 	enc := gob.NewEncoder(file)
 	state := persistedUserState{
-		CommitmentHashBytes: u.commitmentHashBytes,
-		NullifierBytes:      u.nullifierBytes,
-		NullifierHashBytes:  u.nullifierHashBytes,
-		SecretBytes:         u.secretBytes,
-		DestinationIDBytes:  u.destinationIDBytes,
+		PendingBurns: u.pendingBurns,
 	}
 	if err := enc.Encode(state); err != nil {
 		return err
@@ -456,12 +473,14 @@ func (u *User) BurnTx() (string, string, error) {
 	}
 	log.Printf("burn balances user=%v burn=%d->%d claim=%d", u.Name, preBurnBalance, postBurnBalance, postClaimBalance)
 
-	// save the calculated values:
-	u.commitmentHashBytes = commitmentHashBytes[:]
-	u.nullifierBytes = nullifierBytes[:]
-	u.nullifierHashBytes = nullifierHashBytes[:]
-	u.secretBytes = secretBytes[:]
-	u.destinationIDBytes = destinationIDBytes[:]
+	// Queue the burn's private parameters for a later claim (oldest first).
+	u.pendingBurns = append(u.pendingBurns, BurnNote{
+		CommitmentHashBytes: commitmentHashBytes[:],
+		NullifierBytes:      nullifierBytes[:],
+		NullifierHashBytes:  nullifierHashBytes[:],
+		SecretBytes:         secretBytes[:],
+		DestinationIDBytes:  destinationIDBytes[:],
+	})
 	if err := u.saveState(); err != nil {
 		return "", "", fmt.Errorf("failed to persist user state (user=%v): %w", u.Name, err)
 	}
@@ -474,14 +493,16 @@ func (u *User) WithdrawTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetch pre-withdraw balance (user=%v): %w", u.Name, err)
 	}
-	if len(u.commitmentHashBytes) == 0 {
+	if len(u.pendingBurns) == 0 {
 		if err := u.loadState(); err != nil {
 			return "", fmt.Errorf("failed to load persisted user state (user=%v): %w", u.Name, err)
 		}
 	}
-	if len(u.commitmentHashBytes) == 0 {
-		return "", fmt.Errorf("no commitment hash available for withdrawal (user=%v)", u.Name)
+	if len(u.pendingBurns) == 0 {
+		return "", fmt.Errorf("no unclaimed burn available for withdrawal (user=%v)", u.Name)
 	}
+	// Claim the oldest unclaimed burn.
+	note := u.pendingBurns[0]
 	// fetch from ipfs:
 	latestIPFSHash, err := u.getLatestIPFSHashView()
 	if err != nil {
@@ -496,9 +517,9 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("failed to deserialize ipfs content (user=%v): %v", u.Name, err)
 	}
 	// search ipfs for the commitment hash:
-	incVote, ok := ipfsContent.CommitmentHashIncVote[string(u.commitmentHashBytes)]
+	incVote, ok := ipfsContent.CommitmentHashIncVote[string(note.CommitmentHashBytes)]
 	if !ok {
-		return "", fmt.Errorf("commitment hash not found in ipfs (user=%v hash=%s)", u.Name, common.BytesToHash(u.commitmentHashBytes).Hex())
+		return "", fmt.Errorf("commitment hash not found in ipfs (user=%v hash=%s)", u.Name, common.BytesToHash(note.CommitmentHashBytes).Hex())
 	}
 	tree := ipfsContent.IncMerkleTree
 	if reflect.DeepEqual(tree, merkle.IncrementalMerkleTree{}) {
@@ -527,13 +548,12 @@ func (u *User) WithdrawTx() (string, error) {
 
 	var witness merkleproof.MerkleProofCircuit
 
-	witness.Nullifier = new(big.Int).SetBytes(u.nullifierBytes)
-	witness.Secret = new(big.Int).SetBytes(u.secretBytes)
-	witness.DestinationID = new(big.Int).SetBytes(u.destinationIDBytes)
+	witness.Nullifier = new(big.Int).SetBytes(note.NullifierBytes)
+	witness.Secret = new(big.Int).SetBytes(note.SecretBytes)
+	witness.DestinationID = new(big.Int).SetBytes(note.DestinationIDBytes)
 
 	witness.Leaf = proofIndex
-	// witness.CommitmentHash = u.commitmentHashBytes
-	witness.NullifierHash = u.nullifierHashBytes
+	witness.NullifierHash = note.NullifierHashBytes
 	witness.M.RootHash = merkleRoot
 
 	witness.M.Path = make([]frontend.Variable, depth+1)
@@ -631,7 +651,7 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("failed to marshal public witness (user=%v): %v", u.Name, err)
 	}
 
-	tx, err := bcClient.Claim(trxOpts, proofBytes, publicWitnessBytes, [32]byte(u.nullifierHashBytes))
+	tx, err := bcClient.Claim(trxOpts, proofBytes, publicWitnessBytes, [32]byte(note.NullifierHashBytes))
 	if err != nil {
 		return "", fmt.Errorf("call Claim() function: %w", err)
 	}
@@ -656,11 +676,22 @@ func (u *User) WithdrawTx() (string, error) {
 	}
 	// Claims are pending until the committee finalizes the round: tokens are
 	// minted by submitWiVote after the Aggregating proof verifies (paper
-	// SIV-E Step 17), so the claim balance must be unchanged here.
-	if postClaimBalance != preClaimBalance {
-		return "", fmt.Errorf("claim credited before batch finalization (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
+	// SIV-E Step 17). An increase here can only come from an earlier round
+	// finalizing concurrently; a decrease is impossible.
+	if postClaimBalance < preClaimBalance {
+		return "", fmt.Errorf("claim balance decreased (user=%v before=%d after=%d)", u.Name, preClaimBalance, postClaimBalance)
 	}
-	log.Printf("claim submitted, pending batch verification: user=%v burn=%d claim=%d", u.Name, postBurnBalance, postClaimBalance)
+	if postClaimBalance > preClaimBalance {
+		log.Printf("claim balance increased during submission (earlier round finalized): user=%v claim=%d->%d", u.Name, preClaimBalance, postClaimBalance)
+	}
+
+	// The note's claim is submitted: consume it and persist the queue.
+	u.pendingBurns = u.pendingBurns[1:]
+	if err := u.saveState(); err != nil {
+		return "", fmt.Errorf("failed to persist user state (user=%v): %w", u.Name, err)
+	}
+
+	log.Printf("claim submitted, pending batch verification: user=%v burn=%d claim=%d pending_burns=%d", u.Name, postBurnBalance, postClaimBalance, len(u.pendingBurns))
 
 	return tx.Hash().Hex(), nil
 }
