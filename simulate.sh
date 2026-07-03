@@ -66,6 +66,10 @@ force_kill_port_listener() {
 }
 
 cleanup_server() {
+	local had_server=""
+	if [ -n "${server_pid:-}" ]; then
+		had_server=1
+	fi
 	if [ -n "${server_pgid:-}" ] && [ "$server_pgid" != "$script_pgid" ]; then
 		kill -TERM "-$server_pgid" 2>/dev/null || true
 	elif [ -n "${server_pid:-}" ]; then
@@ -84,6 +88,9 @@ cleanup_server() {
 	fi
 	if [ -n "${logger_pid:-}" ]; then
 		kill "$logger_pid" 2>/dev/null || true
+		# Reap the logger job quietly so bash does not print a
+		# "Terminated" job-status notice for it.
+		wait "$logger_pid" 2>/dev/null || true
 	fi
 	if [ -n "${server_tmp:-}" ]; then
 		rm -rf "$server_tmp"
@@ -96,6 +103,9 @@ cleanup_server() {
 	server_pgid=""
 	logger_pid=""
 	server_tmp=""
+	if [ -n "$had_server" ]; then
+		echo "✅ Server stopped cleanly."
+	fi
 }
 
 trap cleanup_server EXIT
@@ -317,7 +327,13 @@ run() {
 	fi
 	{
 		while IFS= read -r line; do
-			printf '%s\n' "$line"
+			# Expected shutdown noise (SIGTERM during cleanup) stays in the
+			# log file but is kept off the console.
+			case "$line" in
+			"make: *** [server]"*[Tt]erminated*) ;;
+			*"signal: terminated"*) ;;
+			*) printf '%s\n' "$line" ;;
+			esac
 			printf '%s\n' "$line" >>"$server_log"
 			if [[ "$line" == *"starting server on"* ]]; then
 				: >"$server_ready"
