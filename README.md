@@ -83,6 +83,33 @@ Defaults from `local-setup/zk-chains-docker-compose.yml`:
 Set `ZKSYNC_RPC_URL` and `ZKSYNC_CHAIN_ID` accordingly if you use this mode
 (the Foundry config targets chain ID 271 for zk-chains).
 
+### Cross-rollup deployment (source + destination)
+
+The paper (§V) evaluates ZERUS on two independent zkSync Era instances:
+burns execute on the source rollup (L2A) and claims on the destination
+rollup (L2B). To reproduce that topology:
+
+1. Start the multi-chain stack (`./start-zk-chains.sh`) so two independent
+   L2 instances are available.
+2. Deploy the contracts once per instance (`make deploy` against each
+   instance's RPC), giving each Gateway its own `DESTINATION_ID`.
+3. On the destination server, point the source profile at the source
+   instance's Gateway:
+
+```sh
+SOURCE_RPC_URL=http://localhost:15100     # source rollup RPC
+SOURCE_ORACLE_CONTRACT_ADDRESS=0x...      # source Gateway
+SOURCE_CHAIN_ID=271                       # optional; auto-detected if 0
+BURN_CONFIRMATION_DEPTH=1                 # source finality rule (blocks)
+```
+
+With the source profile set, the committee observes `BurnSubmitted` events
+on the source chain, buffers them until the confirmation depth elapses,
+inserts them into the commitment tree in deterministic
+(source, block, log index, commitment) order (§IV-E), and verifies claims
+against the local (destination) Gateway. Without the profile the runtime
+falls back to the single-rollup loop for local testing.
+
 ## Environment Variables
 
 The Go server requires a full set of environment variables. Use

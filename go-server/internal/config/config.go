@@ -61,6 +61,16 @@ type Config struct {
 	// d_dst (paper SIV-E; F-24): one value per Gateway instance, used in the
 	// burn commitment C = H(n_rd || s_rd || d_dst). Decimal field element.
 	DestinationID string `env:"DESTINATION_ID" default:"9636219578937187601590327046728695236698322465209974782280717458744997515735"`
+	// BurnConfirmationDepth is the source-rollup finality rule used before
+	// inserting burns into the commitment tree (paper SIV-E / SVII-C;
+	// F-21), expressed as a block-depth confirmation for the local stack.
+	BurnConfirmationDepth int `env:"BURN_CONFIRMATION_DEPTH" default:"0"`
+	// Source rollup profile (paper SV: two independent zkSync Era
+	// instances; F-20). When set, burns are observed on the source chain's
+	// Gateway while claims run against the local (destination) Gateway.
+	SourceRPCURL                string `env:"SOURCE_RPC_URL"`
+	SourceOracleContractAddress string `env:"SOURCE_ORACLE_CONTRACT_ADDRESS"`
+	SourceChainID               int64  `env:"SOURCE_CHAIN_ID" default:"0"`
 	TxGasLimit              int64 `env:"TX_GAS_LIMIT" default:"3000000"`
 	TxGasPriceWei           int64 `env:"TX_GAS_PRICE_WEI" default:"20000000000"`
 	TxGasFeeCapWei          int64 `env:"TX_GAS_FEE_CAP_WEI" default:"0"`

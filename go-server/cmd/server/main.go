@@ -108,6 +108,17 @@ func main() {
 		log.Printf("L1 hub relayer enabled (hub=%s)", cfg.L1HubContractAddress)
 	}
 
+	// Optional source-rollup burn watcher (paper SV; F-20): burns are
+	// observed on the source chain's Gateway, claims run against the local
+	// (destination) Gateway.
+	sourceWatcher, err := events.NewSourceBurnWatcher(context.Background(), cfg, l2Subscriber)
+	if err != nil {
+		log.Printf("source burn watcher disabled: %v", err)
+	} else if sourceWatcher != nil {
+		sourceWatcher.Start(context.Background())
+		log.Printf("source burn watcher enabled (gateway=%s)", cfg.SourceOracleContractAddress)
+	}
+
 	l2Subscriber.Start(context.Background())
 
 	counterHandler := handlers.NewCounterHandler(counterClient)

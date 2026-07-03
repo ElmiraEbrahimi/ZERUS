@@ -1,10 +1,12 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +23,11 @@ import (
 
 const l2LogsChanBuffer = 256
 const l2PollInterval = 1 * time.Second
+
+// burnFlushInterval is the cadence of the burn-finality flusher (F-21): the
+// collection window in which observed burns are gathered before the
+// deterministic sort + finality check.
+const burnFlushInterval = 1 * time.Second
 
 // L2ContractEventSubscriber subscribes to L2 contract logs and keeps a handle to the
 // oracle engine so events can be applied to the runtime state.
@@ -45,6 +52,14 @@ type L2ContractEventSubscriber struct {
 	// finalization, exits, withdrawals, and L1-initiated import/replacement
 	// results to the L1 Hub.
 	relayer L2ToL1Relayer
+
+	// Burn finality pipeline (paper SIV-E; F-21): burns are buffered here
+	// and applied to the commitment tree only after their source-rollup
+	// confirmation depth elapses, in deterministic order.
+	pendingBurnsMu   sync.Mutex
+	pendingBurns     []PendingBurn
+	sourceHeads      map[uint64]func(context.Context) (uint64, error)
+	sourceConfigured bool
 
 	mu        sync.Mutex
 	cancel    context.CancelFunc
@@ -137,6 +152,12 @@ func (l *L2ContractEventSubscriber) Start(parent context.Context) {
 	go func() {
 		defer l.wg.Done()
 		l.run(ctx)
+	}()
+	// Burn-finality flusher (paper SIV-E; F-21).
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		l.runBurnFlusher(ctx)
 	}()
 }
 
@@ -401,8 +422,177 @@ func (l *L2ContractEventSubscriber) handleBurnSubmitted(evlog types.Log) {
 		common.BytesToHash(evt.CommitmentHash[:]).Hex(),
 		eventMeta(evlog),
 	)
-	if err := l.applyBurnSubmittedEvent(evt); err != nil {
-		log.Printf("l2 event BurnSubmitted: apply error: %v", err)
+	if l.sourceConfigured {
+		// A dedicated source-chain watcher feeds the burn pipeline
+		// (paper SIV-E: burns originate on the source rollup); local
+		// BurnSubmitted events on the destination Gateway are ignored.
+		log.Printf("l2 event BurnSubmitted: ignored on destination (source chain configured)")
+		return
+	}
+	l.EnqueueBurn(PendingBurn{
+		SourceID:       l.localSourceID(),
+		BlockNumber:    evlog.BlockNumber,
+		LogIndex:       uint(evlog.Index),
+		CommitmentHash: evt.CommitmentHash,
+	})
+}
+
+// PendingBurn is a burn event buffered until it is final under the source
+// rollup's settlement rule (paper SIV-E / SVII-C, F-21).
+type PendingBurn struct {
+	// SourceID identifies the source rollup instance the burn happened on.
+	SourceID uint64
+	// BlockNumber and LogIndex locate the event on the source chain.
+	BlockNumber    uint64
+	LogIndex       uint
+	CommitmentHash [32]byte
+}
+
+// less orders burns deterministically by (source rollup id, finalized block
+// height, log index, commitment hash) per paper SIV-E, so every validator
+// inserts finalized burns into the commitment tree in the same order.
+func (b PendingBurn) less(o PendingBurn) bool {
+	if b.SourceID != o.SourceID {
+		return b.SourceID < o.SourceID
+	}
+	if b.BlockNumber != o.BlockNumber {
+		return b.BlockNumber < o.BlockNumber
+	}
+	if b.LogIndex != o.LogIndex {
+		return b.LogIndex < o.LogIndex
+	}
+	return bytes.Compare(b.CommitmentHash[:], o.CommitmentHash[:]) < 0
+}
+
+// localSourceID returns the source-rollup identifier for burns observed on
+// the locally subscribed chain.
+func (l *L2ContractEventSubscriber) localSourceID() uint64 {
+	if l.engine != nil && l.engine.Cfg != nil {
+		return uint64(l.engine.Cfg.ChainID)
+	}
+	return 0
+}
+
+// EnqueueBurn buffers a burn until the finality flusher confirms and applies
+// it. Exported so a source-chain watcher (F-20) can feed the same pipeline.
+func (l *L2ContractEventSubscriber) EnqueueBurn(burn PendingBurn) {
+	l.pendingBurnsMu.Lock()
+	defer l.pendingBurnsMu.Unlock()
+	l.pendingBurns = append(l.pendingBurns, burn)
+	log.Printf(
+		"burn buffered: source=%d block=%d logIndex=%d commitment=%s (pending=%d)",
+		burn.SourceID, burn.BlockNumber, burn.LogIndex,
+		common.BytesToHash(burn.CommitmentHash[:]).Hex(), len(l.pendingBurns),
+	)
+}
+
+// SetSourceHeadFn registers a head-height provider for a source rollup so
+// the flusher can apply that source's confirmation rule (F-20/F-21).
+func (l *L2ContractEventSubscriber) SetSourceHeadFn(sourceID uint64, head func(context.Context) (uint64, error)) {
+	l.pendingBurnsMu.Lock()
+	defer l.pendingBurnsMu.Unlock()
+	if l.sourceHeads == nil {
+		l.sourceHeads = make(map[uint64]func(context.Context) (uint64, error))
+	}
+	l.sourceHeads[sourceID] = head
+}
+
+// MarkSourceConfigured tells the subscriber that burns arrive from a
+// dedicated source-chain watcher (F-20) and local BurnSubmitted events on
+// the destination Gateway must be ignored.
+func (l *L2ContractEventSubscriber) MarkSourceConfigured() {
+	l.sourceConfigured = true
+}
+
+// flushFinalizedBurns applies, in deterministic order, every buffered burn
+// whose confirmation depth has elapsed on its source rollup (paper SIV-E:
+// deterministic sort + finality confirmation before commitment-tree
+// insertion; F-21). Burns whose source head cannot be resolved stay queued.
+func (l *L2ContractEventSubscriber) flushFinalizedBurns(ctx context.Context) {
+	depth := uint64(0)
+	if l.engine != nil && l.engine.Cfg != nil && l.engine.Cfg.BurnConfirmationDepth > 0 {
+		depth = uint64(l.engine.Cfg.BurnConfirmationDepth)
+	}
+
+	l.pendingBurnsMu.Lock()
+	if len(l.pendingBurns) == 0 {
+		l.pendingBurnsMu.Unlock()
+		return
+	}
+	pending := append([]PendingBurn(nil), l.pendingBurns...)
+	heads := l.sourceHeads
+	l.pendingBurnsMu.Unlock()
+
+	// Resolve each source's head once per flush.
+	headBySource := make(map[uint64]uint64)
+	for _, burn := range pending {
+		if _, done := headBySource[burn.SourceID]; done {
+			continue
+		}
+		headFn := heads[burn.SourceID]
+		if headFn == nil && burn.SourceID == l.localSourceID() && l.engine != nil && l.engine.EthClient != nil {
+			headFn = l.engine.EthClient.BlockNumber
+		}
+		if headFn == nil {
+			continue
+		}
+		head, err := headFn(ctx)
+		if err != nil {
+			log.Printf("burn flusher: head lookup failed (source=%d): %v", burn.SourceID, err)
+			continue
+		}
+		headBySource[burn.SourceID] = head
+	}
+
+	ready := make([]PendingBurn, 0, len(pending))
+	remaining := make([]PendingBurn, 0, len(pending))
+	for _, burn := range pending {
+		head, ok := headBySource[burn.SourceID]
+		if ok && head >= burn.BlockNumber+depth {
+			ready = append(ready, burn)
+		} else {
+			remaining = append(remaining, burn)
+		}
+	}
+	if len(ready) == 0 {
+		return
+	}
+
+	sort.Slice(ready, func(i, j int) bool { return ready[i].less(ready[j]) })
+
+	l.pendingBurnsMu.Lock()
+	// Rebuild the queue: anything enqueued during this flush is preserved.
+	requeued := remaining
+	for _, burn := range l.pendingBurns[len(pending):] {
+		requeued = append(requeued, burn)
+	}
+	l.pendingBurns = requeued
+	l.pendingBurnsMu.Unlock()
+
+	for _, burn := range ready {
+		log.Printf(
+			"burn finalized: source=%d block=%d logIndex=%d commitment=%s",
+			burn.SourceID, burn.BlockNumber, burn.LogIndex,
+			common.BytesToHash(burn.CommitmentHash[:]).Hex(),
+		)
+		evt := &eth.OracleBurnSubmitted{CommitmentHash: burn.CommitmentHash}
+		if err := l.applyBurnSubmittedEvent(evt); err != nil {
+			log.Printf("burn flusher: apply error: %v", err)
+		}
+	}
+}
+
+// runBurnFlusher periodically confirms and applies buffered burns.
+func (l *L2ContractEventSubscriber) runBurnFlusher(ctx context.Context) {
+	ticker := time.NewTicker(burnFlushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.flushFinalizedBurns(ctx)
+		}
 	}
 }
 
