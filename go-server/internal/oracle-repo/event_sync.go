@@ -45,6 +45,39 @@ func (o *Oracle) ApplyRegisteredEvent(event *eth.OracleRegistered) error {
 	})
 }
 
+// ApplyReplacedEvent mirrors an on-chain validator-leaf replacement in every
+// node's local state tree. The event carries the full new leaf contents
+// (index, key, stake); without applying it, all nodes except the caller
+// would keep a stale leaf and later membership proofs would open a root the
+// Gateway no longer has (F-19 enforcement).
+func (o *Oracle) ApplyReplacedEvent(event *eth.OracleReplaced) error {
+	if o == nil {
+		return fmt.Errorf("oracle: nil")
+	}
+	if event == nil {
+		return fmt.Errorf("oracle: replaced event is nil")
+	}
+
+	x := fr.NewElement(0)
+	y := fr.NewElement(0)
+	x.SetBigInt(event.Pubkey.X)
+	y.SetBigInt(event.Pubkey.Y)
+	publicKey := eddsa.PublicKey{A: twistededwards.NewPointAffine(x, y)}
+
+	return o.applyToStates(func(state *gnark.State) error {
+		account, err := state.ReadAccount(event.Index.Uint64())
+		if err != nil {
+			return fmt.Errorf("read replaced account: %w", err)
+		}
+		account.PublicKey = &publicKey
+		account.Balance = new(big.Int).Set(event.Stake)
+		if err := state.WriteAccount(account); err != nil {
+			return fmt.Errorf("write replaced account: %w", err)
+		}
+		return nil
+	})
+}
+
 func (o *Oracle) ApplyWiVoteSubmittedEvent(event *eth.OracleWiVoteSubmitted) error {
 	if o == nil {
 		return fmt.Errorf("oracle: nil")

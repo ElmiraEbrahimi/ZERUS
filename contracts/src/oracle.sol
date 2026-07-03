@@ -213,7 +213,16 @@ contract Oracle is MerkleTree {
         string dfsRef
     );
 
-    event Replaced(address indexed sender, address indexed replaced);
+    /// @notice Emitted when a validator leaf is replaced. Carries the full
+    /// new leaf contents (index, key, stake) so every off-chain validator can
+    /// mirror the update in its local state tree.
+    event Replaced(
+        address indexed sender,
+        address indexed replaced,
+        uint256 index,
+        PublicKey pubkey,
+        uint256 stake
+    );
     event Exiting(address indexed sender);
     event Withdrawn(address indexed sender);
 
@@ -340,7 +349,13 @@ contract Oracle is MerkleTree {
             accounts[request.targetAccount.index] = request.candidateAddr;
             validators[request.targetValidatorID] = request.candidateAddr;
             isValidator[request.candidateAddr] = true;
-            emit Replaced(request.candidateAddr, replacedAddr);
+            emit Replaced(
+                request.candidateAddr,
+                replacedAddr,
+                request.targetAccount.index,
+                request.candidatePubKey,
+                request.candidateStake
+            );
         }
 
         uint256 newRoot = getRoot();
@@ -613,7 +628,13 @@ contract Oracle is MerkleTree {
         (bool ok, ) = replacedAddr.call{value: toReplace.balance}("");
         require(ok, "ETH_TRANSFER_FAILED");
 
-        emit Replaced(msg.sender, replacedAddr);
+        emit Replaced(
+            msg.sender,
+            replacedAddr,
+            toReplace.index,
+            publicKey,
+            msg.value
+        );
     }
 
     /// @notice Request an exit from the validator set (paper SIV-C): the

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
@@ -1473,8 +1474,44 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	return nil
 }
 
+// awaitStateSync blocks until this node's local validator-state root equals
+// the Gateway's on-chain root. Round finalization (WiVoteSubmitted) and leaf
+// replacements are applied to local state asynchronously by the event
+// subscriber; a membership proof built before those events land would open a
+// stale root and revert on-chain (F-19 enforcement).
+func (n *Node) awaitStateSync(timeout time.Duration) error {
+	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
+	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
+	if err != nil {
+		return fmt.Errorf("create contract client instance: %w", err)
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		onChainRoot, err := bcClient.GetRoot(&bind.CallOpts{})
+		if err != nil {
+			return fmt.Errorf("read on-chain validator-state root: %w", err)
+		}
+		localRoot, err := n.state.Root()
+		if err != nil {
+			return fmt.Errorf("compute local state root: %w", err)
+		}
+		if onChainRoot.Cmp(new(big.Int).SetBytes(localRoot)) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("local validator state not synced with on-chain root within %s (node=%d local=%x onchain=%s)",
+				timeout, n.ID, localRoot, onChainRoot.String())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	fmt.Printf("starting to replace account (node=%v)...\n", n.ID)
+
+	if err := n.awaitStateSync(30 * time.Second); err != nil {
+		return fmt.Errorf("replace: %w", err)
+	}
 
 	account, err := n.state.ReadAccount(n.Account.Index.Uint64())
 	if err != nil {
@@ -1543,7 +1580,7 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	}
 
 	if receipt.Status != 1 {
-		log.Fatalf("replace tx reverted (index=%d)\n", account.Index.Uint64())
+		return fmt.Errorf("replace tx reverted (index=%d tx=%s)", account.Index.Uint64(), tx.Hash().Hex())
 	}
 
 	// 6. Update local state to mirror the on-chain leaf replacement: the
@@ -1559,6 +1596,10 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 
 func (n *Node) ExitTx() error {
 	fmt.Printf("exiting account (node=%v)...\n", n.ID)
+
+	if err := n.awaitStateSync(30 * time.Second); err != nil {
+		return fmt.Errorf("exit: %w", err)
+	}
 
 	account, err := n.state.ReadAccount(n.Account.Index.Uint64())
 	if err != nil {
@@ -1612,7 +1653,7 @@ func (n *Node) ExitTx() error {
 	}
 
 	if receipt.Status != 1 {
-		log.Fatalf("exit tx reverted (index=%d)\n", account.Index.Uint64())
+		return fmt.Errorf("exit tx reverted (index=%d tx=%s)", account.Index.Uint64(), tx.Hash().Hex())
 	}
 
 	return nil
@@ -1620,6 +1661,10 @@ func (n *Node) ExitTx() error {
 
 func (n *Node) WithdrawAccountTx() error {
 	fmt.Printf("starting withdraw account (node=%v)...\n", n.ID)
+
+	if err := n.awaitStateSync(30 * time.Second); err != nil {
+		return fmt.Errorf("withdraw: %w", err)
+	}
 
 	account, err := n.state.ReadAccount(n.Account.Index.Uint64())
 	if err != nil {
@@ -1680,7 +1725,7 @@ func (n *Node) WithdrawAccountTx() error {
 	if receipt.Status == 1 {
 		log.Printf("withdrawn account index=%d", account.Index.Uint64())
 	} else {
-		log.Fatalf("withdraw tx reverted (index=%d)\n", account.Index.Uint64())
+		return fmt.Errorf("withdraw tx reverted (index=%d tx=%s)", account.Index.Uint64(), tx.Hash().Hex())
 	}
 	//averageCost = averageCost / uint64(len(accounts))
 

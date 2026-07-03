@@ -736,11 +736,20 @@ func (l *L2ContractEventSubscriber) handleReplaced(evlog types.Log) {
 		return
 	}
 	log.Printf(
-		"l2 event Replaced: sender=%s replaced=%s %s",
+		"l2 event Replaced: sender=%s replaced=%s index=%s stake=%s %s",
 		evt.Sender.Hex(),
 		evt.Replaced.Hex(),
+		evt.Index,
+		evt.Stake,
 		eventMeta(evlog),
 	)
+	if l.engine == nil || l.engine.Oracle == nil {
+		log.Printf("l2 event Replaced: oracle engine not initialized")
+		return
+	}
+	if err := l.engine.Oracle.ApplyReplacedEvent(evt); err != nil {
+		log.Printf("l2 event Replaced: apply error: %v", err)
+	}
 }
 
 func (l *L2ContractEventSubscriber) handleUserRegistered(evlog types.Log) {
