@@ -39,7 +39,7 @@ down:
 	cd local-setup && ./clear.sh
 
 .PHONY: deploy
-deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle deploy-messengers deploy-l1hub-if-configured
+deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-mimc deploy-merkle-tree deploy-oracle deploy-messengers deploy-l1hub-if-configured
 
 .PHONY: deploy-counter deploy-l2-messenger deploy-l1-messenger configure-l2-messenger deploy-messengers deploy-messengers-if-configured abigen-messengers ensure-l1-mailbox
 deploy-counter:
@@ -313,12 +313,46 @@ deploy-votingbatch-verifier: gnark-votingbatch-verifier
 	@echo "Regenerated go-server/internal/eth/votingbatch_verifier_abigen.go"
 	@echo "Voting batch verifier deployment + ABI regeneration complete."
 
+.PHONY: deploy-mimc
+# The MiMC library must be deployed at a known address and pinned with
+# --libraries: when foundry-zksync auto-deploys a missing library from a
+# script, the address linked into the dependent contract's bytecode comes
+# from the script SIMULATION and can diverge from the address the library
+# actually lands on (nonce shift), leaving Oracle/MerkleTree calling an
+# empty account (every MiMC hash reverts). forge create reports the address
+# from the actual receipt, so it is reliable.
+deploy-mimc:
+	$(ANNOUNCE_TARGET)
+	@echo "Deploying MiMC library via forge-zksync create..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	  forge create src/mimc.sol:MiMC --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --broadcast \
+	    2>&1 | tee /tmp/forge_mimc_deploy.log
+
+	@addr=$$(awk '/Deployed to:/ {print $$3}' /tmp/forge_mimc_deploy.log | tail -n1); \
+	if [ -z "$$addr" ]; then \
+		echo "ERROR: could not extract MiMC library address from forge create output" >&2; \
+		exit 1; \
+	fi; \
+	echo "Detected MiMC library address: $$addr"; \
+	if [ -f .env ]; then \
+		awk -v addr="$$addr" 'BEGIN{updated=0} \
+		/^MIMC_LIBRARY_ADDRESS=/{print "MIMC_LIBRARY_ADDRESS=" addr; updated=1; next} \
+		{print} \
+		END{if(!updated) print "MIMC_LIBRARY_ADDRESS=" addr}' .env > .env.tmp && mv .env.tmp .env; \
+	else \
+		echo "MIMC_LIBRARY_ADDRESS=$$addr" > .env; \
+	fi; \
+	echo "Updated .env with MIMC_LIBRARY_ADDRESS=$$addr"
+
 .PHONY: deploy-oracle
 deploy-oracle:
 	$(ANNOUNCE_TARGET)
 	@echo "Deploying Oracle via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
+	  test -n "$$MIMC_LIBRARY_ADDRESS" || { echo "ERROR: MIMC_LIBRARY_ADDRESS unset; run 'make deploy-mimc' first" >&2; exit 1; } && \
 	  forge script script/DeployOracle.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --libraries src/mimc.sol:MiMC:$$MIMC_LIBRARY_ADDRESS \
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_oracle_deploy.log
 
@@ -352,7 +386,9 @@ deploy-merkle-tree:
 	$(ANNOUNCE_TARGET)
 	@echo "Deploying MerkleTree via forge-zksync..."
 	@cd contracts && set -a && . ../.env && set +a && \
+	  test -n "$$MIMC_LIBRARY_ADDRESS" || { echo "ERROR: MIMC_LIBRARY_ADDRESS unset; run 'make deploy-mimc' first" >&2; exit 1; } && \
 	  forge script script/DeployMerkleTree.s.sol --zksync --rpc-url "$$ZKSYNC_RPC_URL" \
+	    --libraries src/mimc.sol:MiMC:$$MIMC_LIBRARY_ADDRESS \
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_merkle_tree_deploy.log
 
