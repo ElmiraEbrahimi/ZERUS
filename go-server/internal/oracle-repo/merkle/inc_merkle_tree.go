@@ -99,78 +99,58 @@ func (tree *IncrementalMerkleTree) LatestRoot() []byte {
 	return tree.Roots[len(tree.Roots)-1]
 }
 
-// Generate the Merkle proof path for a given leaf index.
+// GetProofPath generates the Merkle proof path for a given leaf index.
+//
+// The proof must open the tree's LATEST root — the root the aggregator
+// published on the Gateway — regardless of which position the target leaf
+// occupies. The tree is therefore rebuilt level by level over ALL current
+// leaves (zero-padded on the right), and the siblings of `index` are read
+// off each level. (A previous version rebuilt only leaves 0..index, so
+// proofs for any leaf other than the most recently inserted one opened a
+// stale root and were rejected against the published commitment root.)
 func (tree *IncrementalMerkleTree) GetProofPath(index uint64) ([]byte, [][]byte, error) {
 	if index >= uint64(len(tree.Leaves)) {
 		return nil, nil, fmt.Errorf("invalid index")
 	}
 
 	mimcHash := hash.MIMC_BN254.New()
-	filledSubtrees := make(map[int][]byte) // Cache filled left nodes
-	proofPath := [][]byte{}
-	var merkleRoot []byte // Final Merkle root
 
-	// Step 1: Rebuild the tree from leaf 0 to the proof index
-	for i := uint64(0); i <= index; i++ {
-		currentLeafHash := tree.Leaves[i]
-		currentLeafIndex := i
+	level := make([][]byte, len(tree.Leaves))
+	copy(level, tree.Leaves)
 
-		for level := 0; level < tree.Depth; level++ {
-			var sibling []byte
-			siblingIndex := currentLeafIndex ^ 1 // Flip last bit to find sibling
+	// proofPath[0] is the leaf value itself; proofPath[1..Depth] are the
+	// sibling hashes, matching the circuit's VerifyProofIncremental layout.
+	proofPath := [][]byte{tree.Leaves[index]}
+	pos := index
 
-			// Determine sibling value
-			if currentLeafIndex%2 == 0 { // Left child
-				// Right sibling exists at level 0
-				if level == 0 && siblingIndex < uint64(len(tree.Leaves)) && siblingIndex <= index {
-					sibling = tree.Leaves[siblingIndex]
-				} else {
-					sibling = tree.ZeroValues[level] // Use zero value for right siblings
-				}
-			} else { // Right child
-				// Fetch left sibling from cache **only if the sibling index is even**
-				if siblingIndex%2 == 0 {
-					if val, exists := filledSubtrees[level]; exists {
-						sibling = val // Use cached intermediate left node
-					} else {
-						sibling = tree.ZeroValues[level] // Default to zero if no cache
-					}
-				} else {
-					sibling = tree.ZeroValues[level] // Force zero for odd siblings
-				}
-			}
-
-			// If processing the target leaf, capture the sibling for the proof path
-			if i == index {
-				proofPath = append(proofPath, sibling)
-			}
-
-			// Cache the left child at this level
-			if currentLeafIndex%2 == 0 {
-				filledSubtrees[level] = currentLeafHash
-			}
-
-			// Compute parent hash
-			mimcHash.Reset()
-			if currentLeafIndex%2 == 0 { // Left child
-				mimcHash.Write(currentLeafHash)
-				mimcHash.Write(sibling)
-			} else { // Right child
-				mimcHash.Write(sibling)
-				mimcHash.Write(currentLeafHash)
-			}
-
-			currentLeafHash = mimcHash.Sum(nil)
-			currentLeafIndex /= 2 // Move to parent level
-
-			// Capture the final root when at the last level
-			if i == index && level == tree.Depth-1 {
-				merkleRoot = currentLeafHash
-			}
+	for d := 0; d < tree.Depth; d++ {
+		sibPos := pos ^ 1
+		var sibling []byte
+		if sibPos < uint64(len(level)) {
+			sibling = level[sibPos]
+		} else {
+			sibling = tree.ZeroValues[d]
 		}
-	}
-	// Append the leaf value itself to the proof path
-	proofPath = append([][]byte{tree.Leaves[index]}, proofPath...)
+		proofPath = append(proofPath, sibling)
 
+		next := make([][]byte, (len(level)+1)/2)
+		for i := 0; i < len(level); i += 2 {
+			left := level[i]
+			var right []byte
+			if i+1 < len(level) {
+				right = level[i+1]
+			} else {
+				right = tree.ZeroValues[d]
+			}
+			mimcHash.Reset()
+			mimcHash.Write(left)
+			mimcHash.Write(right)
+			next[i/2] = mimcHash.Sum(nil)
+		}
+		level = next
+		pos /= 2
+	}
+
+	merkleRoot := level[0]
 	return merkleRoot, proofPath, nil
 }
