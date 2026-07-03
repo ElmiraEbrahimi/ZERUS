@@ -2,8 +2,8 @@ package merkle
 
 import (
 	"fmt"
-	"math/big"
 	"l2alchemy/internal/oracle-repo/util"
+	"math/big"
 	"testing"
 
 	"github.com/consensys/gnark-crypto/ecc"
