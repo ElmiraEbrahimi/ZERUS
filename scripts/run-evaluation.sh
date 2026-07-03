@@ -37,6 +37,9 @@ echo "Results directory: $results_dir"
 for n in $node_counts; do
 	for b in $batch_sizes; do
 		echo "=== sweep: NODE_COUNT=$n BATCH_SIZE=$b runs=$runs ==="
+		# Fresh logs per configuration so each combo directory (and the
+		# aggregated summary) contains only this configuration's samples.
+		rm -rf go-server/logs/memtime
 		./simulate.sh -n "$n" -b "$b" -r "$runs"
 
 		combo_dir="$results_dir/n${n}_b${b}"
