@@ -78,6 +78,10 @@ type Config struct {
 
 	HTTPBindAddr    string `env:"HTTP_BIND_ADDR" default:":8080"`
 	IPFSSimDataPath string `env:"IPFS_SIM_DATA_PATH" default:".ipfs_sim_data.gob"`
+	// IPFSAPIURL, when set (e.g. http://127.0.0.1:5001), stores DFS content
+	// through a real IPFS daemon's HTTP API (paper SV; F-26). When empty,
+	// the local simulation backed by IPFS_SIM_DATA_PATH is used.
+	IPFSAPIURL string `env:"IPFS_API_URL"`
 	UserStatePath   string `env:"USER_STATE_PATH" default:".user_state.gob"`
 }
 

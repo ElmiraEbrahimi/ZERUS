@@ -89,8 +89,9 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 		return nil, fmt.Errorf("oracle runtime init: dial eth client: %w", err)
 	}
 
-	// create ipfs:
-	ipfsCl, err := db.NewIPFSClient(true, cfg.IncTreeDepth, cfg.IPFSSimDataPath)
+	// create ipfs: real daemon when IPFS_API_URL is set (paper SV; F-26),
+	// local simulation otherwise so tests run without a daemon.
+	ipfsCl, err := db.NewIPFSClient(cfg.IPFSAPIURL == "", cfg.IncTreeDepth, cfg.IPFSSimDataPath, cfg.IPFSAPIURL)
 	if err != nil {
 		return nil, fmt.Errorf("oracle runtime init: create ipfs client: %w", err)
 	}

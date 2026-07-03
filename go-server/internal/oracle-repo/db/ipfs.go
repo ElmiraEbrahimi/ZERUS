@@ -3,12 +3,19 @@ package db
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"l2alchemy/internal/oracle-repo/merkle"
+	"mime/multipart"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -26,8 +33,15 @@ type IPFSClient struct {
 	IPFS         *IPFS
 	IsSimulation bool   `json:"is_simulation"`
 	LatestHash   string `json:"latest_hash"`
-	storagePath string
-	mu          sync.RWMutex
+	// Real IPFS mode (paper SV: "we implement the DFS using IPFS"; F-26):
+	// objects are added/fetched over the HTTP API of a local daemon
+	// (/api/v0/add, /api/v0/cat). The simulation remains as the fallback
+	// when no IPFS endpoint is configured, so tests run without a daemon.
+	apiURL         string
+	zeroValuesHash string
+	httpClient     *http.Client
+	storagePath    string
+	mu             sync.RWMutex
 }
 
 type ipfsSimState struct {
@@ -35,14 +49,18 @@ type ipfsSimState struct {
 	LatestHash string
 }
 
-func NewIPFSClient(simulate bool, zeroValueTreeDepth int, storagePath string) (*IPFSClient, error) {
+// NewIPFSClient builds the DFS client. With simulate=true, state lives in a
+// local gob file. Otherwise apiURL must point at an IPFS daemon HTTP API
+// (e.g. http://127.0.0.1:5001) and content is stored through it (F-26).
+func NewIPFSClient(simulate bool, zeroValueTreeDepth int, storagePath string, apiURL string) (*IPFSClient, error) {
 	if simulate {
 		client := &IPFSClient{
 			IPFS: &IPFS{
 				Data: make(map[string][]byte),
 			},
-			IsSimulation: true,
-			storagePath:  storagePath,
+			IsSimulation:   true,
+			zeroValuesHash: ZERO_VALUES_HASH,
+			storagePath:    storagePath,
 		}
 
 		if storagePath != "" {
@@ -58,7 +76,34 @@ func NewIPFSClient(simulate bool, zeroValueTreeDepth int, storagePath string) (*
 
 		return client, nil
 	}
-	return nil, errors.New("not implemented")
+
+	apiURL = strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	if apiURL == "" {
+		return nil, errors.New("ipfs: real mode requires IPFS_API_URL")
+	}
+	client := &IPFSClient{
+		IsSimulation: false,
+		apiURL:       apiURL,
+		httpClient:   &http.Client{Timeout: 60 * time.Second},
+	}
+
+	// Publish the zero values once so validators and users can bootstrap
+	// their trees from the DFS, mirroring the simulated client.
+	zeroValues, err := merkle.GenerateZeroValues(zeroValueTreeDepth)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(zeroValues); err != nil {
+		return nil, err
+	}
+	zvHash, err := client.uploadReal(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("ipfs: publish zero values: %w", err)
+	}
+	client.zeroValuesHash = zvHash
+
+	return client, nil
 }
 
 // region core
@@ -75,7 +120,15 @@ func (i *IPFSClient) Upload(content []byte) (string, error) {
 		}
 		return hash, nil
 	}
-	return "", errors.New("not implemented")
+
+	hash, err := i.uploadReal(content)
+	if err != nil {
+		return "", err
+	}
+	i.mu.Lock()
+	i.LatestHash = hash
+	i.mu.Unlock()
+	return hash, nil
 }
 
 func (i *IPFSClient) Download(hash string) ([]byte, error) {
@@ -94,7 +147,79 @@ func (i *IPFSClient) Download(hash string) ([]byte, error) {
 		}
 		return content, nil
 	}
-	return nil, errors.New("not implemented")
+
+	if hash == DEFAULT_HASH {
+		i.mu.RLock()
+		hash = i.LatestHash
+		i.mu.RUnlock()
+	}
+	if hash == "" {
+		return nil, errors.New("no latest hash available in IPFS")
+	}
+	return i.downloadReal(hash)
+}
+
+// uploadReal adds content via the daemon's /api/v0/add endpoint and returns
+// the resulting CID.
+func (i *IPFSClient) uploadReal(content []byte) (string, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "zerus.bin")
+	if err != nil {
+		return "", fmt.Errorf("ipfs add: build form: %w", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		return "", fmt.Errorf("ipfs add: write form: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("ipfs add: close form: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, i.apiURL+"/api/v0/add?pin=true", &body)
+	if err != nil {
+		return "", fmt.Errorf("ipfs add: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := i.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("ipfs add: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("ipfs add: status %d: %s", resp.StatusCode, string(msg))
+	}
+
+	var out struct {
+		Hash string `json:"Hash"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("ipfs add: decode response: %w", err)
+	}
+	if out.Hash == "" {
+		return "", errors.New("ipfs add: empty hash in response")
+	}
+	return out.Hash, nil
+}
+
+// downloadReal fetches content via the daemon's /api/v0/cat endpoint.
+func (i *IPFSClient) downloadReal(hash string) ([]byte, error) {
+	endpoint := i.apiURL + "/api/v0/cat?arg=" + url.QueryEscape(hash)
+	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ipfs cat: build request: %w", err)
+	}
+	resp, err := i.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ipfs cat: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ipfs cat: status %d: %s", resp.StatusCode, string(msg))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // endregion
@@ -105,7 +230,7 @@ func (i *IPFSClient) GetZeroValues() ([][]byte, error) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	var zeroValues [][]byte
-	content, err := i.Download(ZERO_VALUES_HASH)
+	content, err := i.Download(i.zeroValuesHash)
 	if err != nil {
 		return nil, err
 	}
