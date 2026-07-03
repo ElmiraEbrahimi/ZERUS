@@ -50,7 +50,7 @@ deploy-counter:
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_deploy.log
 
-	@addr=$$(awk '/Counter deployed at/ {print $$4}' /tmp/forge_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployCounter.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract Counter address from forge output" >&2; \
 		exit 1; \
@@ -84,7 +84,7 @@ deploy-l2-messenger:
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_l2_messenger_deploy.log
 
-	@addr=$$(awk '/L2Messenger deployed at/ {print $$4}' /tmp/forge_l2_messenger_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployL2Messenger.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract L2Messenger address from forge output" >&2; \
 		exit 1; \
@@ -109,7 +109,7 @@ deploy-l1-messenger: ensure-l1-mailbox
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --legacy --gas-price "$$gas_price" --broadcast \
 	    2>&1 | tee /tmp/forge_l1_messenger_deploy.log
 
-	@addr=$$(awk '/L1Messenger deployed at/ {print $$4}' /tmp/forge_l1_messenger_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployL1Messenger.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract L1Messenger address from forge output" >&2; \
 		exit 1; \
@@ -181,7 +181,7 @@ deploy-l1hub: ensure-l1-mailbox
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --legacy --gas-price "$$gas_price" --broadcast \
 	    2>&1 | tee /tmp/forge_l1hub_deploy.log
 
-	@addr=$$(awk '/L1Hub deployed at/ {print $$4}' /tmp/forge_l1hub_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployL1Hub.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract L1Hub address from forge output" >&2; \
 		exit 1; \
@@ -248,7 +248,7 @@ deploy-merkle-verifier: gnark-merkle-verifier
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_merkle_deploy.log
 
-	@addr=$$(awk '/MerkleProofVerifier deployed at/ {print $$NF}' /tmp/forge_merkle_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployMerkleProofVerifier.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract MerkleProofVerifier address from forge output" >&2; \
 		exit 1; \
@@ -287,7 +287,7 @@ deploy-votingbatch-verifier: gnark-votingbatch-verifier
 	    --zksync --rpc-url "$$ZKSYNC_RPC_URL" --private-key "$$ZKSYNC_PRIVATE_KEY" \
 	    --suppress-warnings assemblycreate --broadcast 2>&1 | tee /tmp/forge_votingbatch_deploy.log
 
-	@addr=$$(awk '/VotingBatchVerifier deployed at/ {print $$NF}' /tmp/forge_votingbatch_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployVotingBatchVerifier.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract VotingBatchVerifier address from forge output" >&2; \
 		exit 1; \
@@ -322,7 +322,7 @@ deploy-oracle:
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_oracle_deploy.log
 
-	@addr=$$(awk '/Oracle deployed at/ {print $$4}' /tmp/forge_oracle_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployOracle.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract Oracle address from forge output" >&2; \
 		exit 1; \
@@ -356,7 +356,7 @@ deploy-merkle-tree:
 	    --private-key "$$ZKSYNC_PRIVATE_KEY" --suppress-warnings assemblycreate --broadcast \
 	    2>&1 | tee /tmp/forge_merkle_tree_deploy.log
 
-	@addr=$$(awk '/MerkleTree deployed at/ {print $$NF}' /tmp/forge_merkle_tree_deploy.log | tail -n1); \
+	@addr=$$(scripts/deployed-address.sh DeployMerkleTree.s.sol); \
 	if [ -z "$$addr" ]; then \
 		echo "ERROR: deployment succeeded but could not extract MerkleTree address from forge output" >&2; \
 		exit 1; \
