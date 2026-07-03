@@ -10,6 +10,7 @@ import (
 	merkleproof "l2alchemy/circuits/merkle_proof"
 	votingbatch "l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/config"
+	bc "l2alchemy/internal/eth"
 	"l2alchemy/internal/oracle-repo"
 	"l2alchemy/internal/oracle-repo/db"
 	"l2alchemy/internal/oracle-repo/gnark"
@@ -19,6 +20,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254/twistededwards/eddsa"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -58,6 +61,29 @@ func Global() *OracleEngine {
 	return global
 }
 
+// validateOnChainBatchSize fails fast when the configured BATCH_SIZE does
+// not match the deployed Gateway's immutable batch size: the deterministic
+// claim windows (paper SIV-D) are computed from both, and a silent mismatch
+// would misalign minting against the committee's batches.
+func validateOnChainBatchSize(ctx context.Context, ethCl *ethclient.Client, cfg *config.Config) error {
+	oracleAddr := common.HexToAddress(cfg.OracleContractAddress)
+	oracleClient, err := bc.NewOracle(oracleAddr, ethCl)
+	if err != nil {
+		return fmt.Errorf("oracle runtime init: bind oracle contract: %w", err)
+	}
+	onChain, err := oracleClient.BatchSize(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		return fmt.Errorf("oracle runtime init: read on-chain batch size (is ORACLE_CONTRACT_ADDRESS current?): %w", err)
+	}
+	if !onChain.IsInt64() || onChain.Int64() != int64(cfg.BatchSize) {
+		return fmt.Errorf(
+			"oracle runtime init: BATCH_SIZE=%d does not match the deployed Gateway's batch size %s; redeploy the Oracle (make deploy-oracle) or fix .env",
+			cfg.BatchSize, onChain,
+		)
+	}
+	return nil
+}
+
 // Init constructs the OracleEngine and performs bootstrap actions that must happen before the
 // server starts (including creating an initial user via user.NewUser).
 func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
@@ -87,6 +113,14 @@ func Init(cfg *config.Config, keyDir string) (*OracleEngine, error) {
 	ethCl, err := ethclient.DialContext(ctx, cfg.RPCURL)
 	if err != nil {
 		return nil, fmt.Errorf("oracle runtime init: dial eth client: %w", err)
+	}
+
+	// The claim-identifier windows [r*b, (r+1)*b - 1] (paper SIV-D) are
+	// enforced with the contract's immutable batch size; a BATCH_SIZE that
+	// diverges from the deployed Gateway would silently misalign minting,
+	// so fail fast on mismatch.
+	if err := validateOnChainBatchSize(ctx, ethCl, cfg); err != nil {
+		return nil, err
 	}
 
 	// create ipfs: real daemon when IPFS_API_URL is set (paper SV; F-26),
