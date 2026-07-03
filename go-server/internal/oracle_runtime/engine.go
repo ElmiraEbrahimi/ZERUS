@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	merkleproof "l2alchemy/circuits/merkle_proof"
 	votingbatch "l2alchemy/circuits/voting_batch"
@@ -65,23 +66,52 @@ func Global() *OracleEngine {
 // not match the deployed Gateway's immutable batch size: the deterministic
 // claim windows (paper SIV-D) are computed from both, and a silent mismatch
 // would misalign minting against the committee's batches.
+//
+// The read is retried for a grace window: right after `make deploy` the
+// local zkSync node may briefly report "no contract code" for a freshly
+// deployed contract (and the local stack is known to roll back recent
+// miniblocks when it is in an inconsistent state), so a transient read
+// failure must not kill the server instantly. A confirmed mismatch is
+// fatal immediately.
 func validateOnChainBatchSize(ctx context.Context, ethCl *ethclient.Client, cfg *config.Config) error {
+	const (
+		attempts = 10
+		backoff  = 3 * time.Second
+	)
+
 	oracleAddr := common.HexToAddress(cfg.OracleContractAddress)
 	oracleClient, err := bc.NewOracle(oracleAddr, ethCl)
 	if err != nil {
 		return fmt.Errorf("oracle runtime init: bind oracle contract: %w", err)
 	}
-	onChain, err := oracleClient.BatchSize(&bind.CallOpts{Context: ctx})
-	if err != nil {
-		return fmt.Errorf("oracle runtime init: read on-chain batch size (is ORACLE_CONTRACT_ADDRESS current?): %w", err)
-	}
-	if !onChain.IsInt64() || onChain.Int64() != int64(cfg.BatchSize) {
-		return fmt.Errorf(
-			"oracle runtime init: BATCH_SIZE=%d does not match the deployed Gateway's batch size %s; redeploy the Oracle (make deploy-oracle) or fix .env",
-			cfg.BatchSize, onChain,
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		onChain, err := oracleClient.BatchSize(&bind.CallOpts{Context: ctx})
+		if err == nil {
+			if !onChain.IsInt64() || onChain.Int64() != int64(cfg.BatchSize) {
+				return fmt.Errorf(
+					"oracle runtime init: BATCH_SIZE=%d does not match the deployed Gateway's batch size %s; redeploy the Oracle (make deploy-oracle) or fix .env",
+					cfg.BatchSize, onChain,
+				)
+			}
+			return nil
+		}
+		lastErr = err
+		log.Printf(
+			"oracle runtime init: read on-chain batch size failed (attempt %d/%d, oracle=%s): %v",
+			attempt, attempts, cfg.OracleContractAddress, err,
 		)
+		if attempt < attempts {
+			time.Sleep(backoff)
+		}
 	}
-	return nil
+	return fmt.Errorf(
+		"oracle runtime init: could not read the Gateway's batch size at %s after %d attempts: %w\n"+
+			"  - if the address is stale, redeploy with 'make deploy'\n"+
+			"  - if the local chain lost recently deployed state (rolled-back miniblocks), reset it with 'make down && make up-deploy'",
+		cfg.OracleContractAddress, attempts, lastErr,
+	)
 }
 
 // Init constructs the OracleEngine and performs bootstrap actions that must happen before the
