@@ -1,7 +1,9 @@
-# L2-Alchemy
+# ZERUS (L2 implementation)
 
-Local zkSync stack + Foundry contracts + a Go HTTP API that drives the Counter
-contract and the on-chain Oracle flow.
+Local zkSync stack + Foundry contracts + a Go HTTP API that runs the ZERUS
+protocol: the L2 Gateway contract (named `Oracle` in code), the L1 Hub, and
+the off-chain validator committee that batches and proves cross-rollup
+claims. Paper-to-code naming is documented in `MAPPING.md`.
 
 ## Prerequisites
 
@@ -13,6 +15,8 @@ Pinned toolchain (paper §V):
 - Go 1.24.x (gnark v0.14.0, gnark-crypto v0.19.0, go-ethereum v1.16.7 are
   pinned in `go-server/go.mod`)
 - abigen (only needed for deploy targets that regenerate bindings)
+- Python 3 (used by `scripts/deployed-address.sh` during `make deploy` and
+  by the evaluation aggregation script)
 
 ## Repository Layout
 
@@ -20,6 +24,7 @@ Pinned toolchain (paper §V):
 contracts/    # Foundry contracts + deploy scripts
 go-server/    # Go HTTP API + oracle runtime
 local-setup/  # zkSync local stack scripts + compose files
+scripts/      # deploy-address resolution + evaluation sweep scripts
 Makefile      # handy wrapper targets
 ```
 
@@ -31,9 +36,9 @@ Makefile      # handy wrapper targets
 cp .env.example .env
 ```
 
-For the default local stack, set `ZKSYNC_RPC_URL=http://localhost:3050` and
-`ZKSYNC_CHAIN_ID=270`. You can grab a funded dev key from
-`local-setup/rich-wallets.json`.
+The defaults in `.env.example` already target the local stack
+(`ZKSYNC_RPC_URL=http://localhost:3051`, `ZKSYNC_CHAIN_ID=270`). You can grab
+a funded dev key from `local-setup/rich-wallets.json`.
 
 2. Start the local zkSync stack:
 
@@ -47,7 +52,11 @@ make up
 make deploy
 ```
 
-`make deploy` requires `abigen` to be available in your PATH.
+`make deploy` requires `abigen` and `python3` in your PATH. It clears stale
+local protocol state, deploys the verifiers, the MiMC library (pinned into
+Oracle/MerkleTree via `--libraries`), the Gateway (`Oracle`), the L1/L2
+messengers, and the L1 Hub, and rewrites the address fields in `.env` from
+the forge broadcast journals.
 
 4. Start the Go API server:
 
@@ -65,6 +74,10 @@ These are the defaults from `local-setup/docker-compose.yml`:
 | ----------- | --------------------- |
 | L2 JSON-RPC | http://localhost:3050 |
 | L2 WS       | ws://localhost:3051   |
+
+The local node also answers HTTP JSON-RPC on port 3051; `.env.example`
+targets `http://localhost:3051` so the Go server and forge share one
+endpoint. Either port works for `ZKSYNC_RPC_URL`.
 
 ## ZK Chains (multi L2, optional)
 
@@ -125,17 +138,31 @@ The Go server requires a full set of environment variables. Use
 | L1_RPC_URL                    | L1 HTTP RPC endpoint (local-setup: http://localhost:8545) |
 | L1_CHAIN_ID                   | L1 chain ID (0 = auto-detect from RPC)                    |
 | L1_GAS_PRICE_WEI              | L1 gas price override for deployments and L1->L2 base cost |
-| L1_MAILBOX_ADDRESS            | zkSync L1 mailbox / bridgehub address                     |
+| L1_MAILBOX_ADDRESS            | zkSync L1 mailbox / bridgehub address (auto-populated)    |
 | L1_USE_DIRECT_MESSAGING       | Use bridgehub direct L1->L2 flow by default               |
 | ZKSYNC_CHAIN_ID               | L2 chain ID                                               |
 | ZKSYNC_PRIVATE_KEY            | deployer/signer key                                       |
 | HTTP_BIND_ADDR                | API bind address                                          |
+| NODE_COUNT                    | committee size n; must equal 2^SPARSE_TREE_DEPTH          |
+| SPARSE_TREE_DEPTH             | validator-state tree depth (max 8)                        |
+| BATCH_SIZE                    | claims per verification round b (paper §IV-D); validated against the deployed Gateway's immutable batch size at server startup |
+| INC_TREE_DEPTH                | commitment (burn) tree depth                              |
+| DESTINATION_ID                | destination rollup identifier d_dst bound into commitments |
+| INITIAL_VALIDATOR_STAKE       | stake locked per validator at registration                |
+| BURN_CONFIRMATION_DEPTH       | blocks before a burn counts as final (source rollup)      |
+| AGGREGATOR_TIMEOUT            | seconds without a finalized round before validators may rotate the aggregator |
+| HUB_WITHDRAW_DELAY            | Hub waiting period (seconds) between exit finalization and stake release |
+| IPFS_API_URL                  | real IPFS daemon API; empty = simulated DFS               |
 | COUNTER_CONTRACT_ADDRESS      | Counter contract address                                  |
 | L1_MESSENGER_CONTRACT_ADDRESS | L1 messenger demo contract address                        |
 | L2_MESSENGER_CONTRACT_ADDRESS | L2 messenger demo contract address                        |
-| ORACLE_CONTRACT_ADDRESS       | Oracle contract address                                   |
+| ORACLE_CONTRACT_ADDRESS       | Gateway (Oracle) contract address                         |
+| MIMC_LIBRARY_ADDRESS          | deployed MiMC library linked into Oracle/MerkleTree       |
+| L1_HUB_CONTRACT_ADDRESS       | L1 Hub contract address                                   |
 
-The deploy targets update contract address fields inside `.env` automatically.
+The deploy targets update the contract address fields (including the MiMC
+library and the L1 mailbox/Hub) inside `.env` automatically, reading each
+address from the forge broadcast journal rather than console output.
 
 ## Makefile Shortcuts
 
@@ -143,7 +170,9 @@ The deploy targets update contract address fields inside `.env` automatically.
 make up          # start local-setup
 make down        # stop and clear local-setup
 make up-deploy   # start local-setup + deploy contracts
-make deploy      # deploy core L2 contracts + L1/L2 messenger demo (requires L1_MAILBOX_ADDRESS)
+make deploy      # reset local state + deploy all contracts (verifiers, MiMC, Gateway, messengers, L1 Hub)
+make deploy-mimc # deploy the MiMC library alone (pinned into Oracle/MerkleTree)
+make reset-local-state # clear persisted user burn notes + simulated DFS
 make deploy-messengers # deploy L2 + L1 messenger demo and link them
 make configure-l2-messenger # set L1 messenger on L2 (if needed)
 make server      # run the Go API server
@@ -154,6 +183,14 @@ make server      # run the Go API server
 ```sh
 cd contracts && forge test        # Gateway conformance tests
 cd go-server && go test ./...     # Go unit tests (thresholds, batching, ordering, crypto vectors)
+```
+
+For an automated end-to-end run (deploy, server, register → burn → claim →
+round finalization → validator replace/exit/withdraw) against a running
+stack, use the simulation driver:
+
+```sh
+./simulate.sh -r 1 -n 8 -b 4 -s 1   # 1 run, 8 validators, batch size 4
 ```
 
 To regenerate the paper's §VI evaluation data (Tables I–II, Figures 5–8),
@@ -171,44 +208,17 @@ configuration and measurement source).
 
 ## L1/L2 Messaging Demo
 
-Set `L1_MAILBOX_ADDRESS` to your zkSync L1 mailbox/bridgehub contract before deploying.
-`make deploy`/`make deploy-messengers` will auto-populate it from `ZKSYNC_RPC_URL` if it is empty.
-Set `L1_USE_DIRECT_MESSAGING=true` for bridgehub-based networks. The deploy script auto-sets it based on RPC capabilities.
-Then run `make deploy-messengers` and use `sendToL2` / `sendToL1` on the deployed contracts.
-
-### Messaging API (quick curl)
-
-Set a base URL once:
-
-```sh
-BASE_URL=http://localhost:18000
-```
-
-L1 -> L2 (send + read on L2):
-
-```sh
-curl -X POST "$BASE_URL/messaging/l1/send" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"ping from L1","l2_gas_limit":2000000,"l2_gas_per_pubdata":800,"value_wei":"0"}'
-
-curl "$BASE_URL/messaging/l2/last-from-l1"
-```
-
-L2 -> L1 (send + read on L1):
-
-```sh
-curl -X POST "$BASE_URL/messaging/l2/send" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"ping from L2"}'
-
-# Wait a few seconds for the relay to finalize on L1.
-curl "$BASE_URL/messaging/l1/last-from-l2"
-```
+`make deploy`/`make deploy-messengers` auto-populate `L1_MAILBOX_ADDRESS`
+(zkSync L1 mailbox/bridgehub) from `ZKSYNC_RPC_URL` and auto-set
+`L1_USE_DIRECT_MESSAGING` based on RPC capabilities; set them manually only
+for networks the probe cannot reach. Then use `sendToL2` / `sendToL1` on the
+deployed demo contracts (or the `/messaging/*` endpoints below).
 
 ### Messaging API (curl examples)
 
-L1 -> L2 (single-chain mode):
-If `value_wei` is empty or `0`, the server estimates the L1 base fee automatically.
+L1 -> L2 (send + read on L2). If `value_wei` is empty or `0`, the server
+estimates the L1 base fee automatically:
+
 ```sh
 curl -X POST http://localhost:18000/messaging/l1/send \
   -H "Content-Type: application/json" \
@@ -224,13 +234,15 @@ curl -X POST http://localhost:18000/messaging/l1/send-direct \
   -d '{"l2_chain_id":271,"message":"hello from L1","l2_gas_limit":2000000,"l2_gas_per_pubdata":800,"value_wei":"0"}'
 ``` -->
 
-L2 -> L1 (requires zkSync proof from L2 RPC):
+L2 -> L1 (send + read on L1; the server relays the zkSync inclusion proof
+automatically — allow a few seconds before reading):
+
 ```sh
 curl -X POST http://localhost:18000/messaging/l2/send \
   -H "Content-Type: application/json" \
   -d '{"message":"hello from L2"}'
 
-# After you fetch the proof (e.g. via zks_getL2ToL1MsgProof), call:
+# To relay a message manually instead (proof via zks_getL2ToL1LogProof):
 # curl -X POST http://localhost:18000/messaging/l1/receive \
 #   -H "Content-Type: application/json" \
 #   -d '{"message":"hello from L2","l2_block_number":123,"l2_log_index":0,"l2_tx_number_in_block":1,"proof":["0x..."]}'
@@ -266,6 +278,37 @@ curl -X POST http://localhost:18000/validators/replace -H "Content-Type: applica
 curl -X POST http://localhost:18000/validators/exit -H "Content-Type: application/json" -d '{"node_id":0}'
 curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: application/json" -d '{"node_id":0}'
 ```
+
+> `validators/register` must run before the first burn: the aggregator can
+> only publish commitment roots once the validator set is registered
+> on-chain.
+
+With `L1_HUB_CONTRACT_ADDRESS` configured (set automatically by
+`make deploy`), every finalized round's `CHECKPOINT` is relayed to the L1
+Hub and consumed by `finalizeFromL2` with a zkSync inclusion proof. The
+`EXIT_REQUEST`/`WITHDRAW_REQUEST` messages emitted by the validator
+exit/withdraw calls above finalize on the Hub only for validators that
+were registered through the L1 lifecycle (`L1Hub.registerValidatorL1` →
+batched import); in this single-chain demo the relayer logs a single
+`finalizeFromL2 reverted, not retrying` line for them and continues —
+that is expected, not a failure.
+
+### Troubleshooting
+
+- **Server exits with `could not read the Gateway's batch size`** — either
+  `ORACLE_CONTRACT_ADDRESS` in `.env` is stale (redeploy with
+  `make deploy`), or the local zkSync node lost recently deployed state
+  (it can roll back fresh miniblocks when its L1 view is inconsistent);
+  reset the stack with `make down && make up-deploy`. The server retries
+  the read for ~30 s before giving up, so a briefly lagging node recovers
+  on its own.
+- **Server exits with `BATCH_SIZE=x does not match the deployed Gateway's
+  batch size y`** — the Gateway's batch size is immutable; after changing
+  `BATCH_SIZE` in `.env`, redeploy (`make deploy` or `make deploy-oracle`).
+- **Withdrawals rejected with `commitment root not recorded` after a
+  redeploy** — stale local state from a previous deployment; run
+  `make reset-local-state` (included in `make deploy`) before
+  `make server`.
 
 ## API Endpoints
 
