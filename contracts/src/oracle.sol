@@ -6,6 +6,29 @@ import "./mimc.sol";
 import {Verifier as VotingVerifier} from "./VotingBatchVerifier.sol";
 import "./merkle_tree.sol";
 
+/// @notice zkSync system messenger used for L2 -> L1 messages (paper SIV-B
+/// Step 5; validator_functions design note).
+interface IL2ToL1SystemMessenger {
+    function sendToL1(bytes calldata message) external returns (bytes32);
+}
+
+/// @notice L1 -> L2 address aliasing (zkSync convention): an L1 contract
+/// calling an L2 contract arrives as alias(l1Address).
+library L1AliasHelper {
+    uint160 internal constant OFFSET =
+        uint160(0x1111000000000000000000000000000000001111);
+
+    function applyL1ToL2Alias(address l1Address)
+        internal
+        pure
+        returns (address)
+    {
+        unchecked {
+            return address(uint160(l1Address) + OFFSET);
+        }
+    }
+}
+
 contract Oracle is MerkleTree {
     uint256 constant INCENTIVIZE_AMOUNT = 1;
     uint256 constant BURN_AMOUNT = 100;
@@ -33,6 +56,43 @@ contract Oracle is MerkleTree {
         bytes32 nullifierHash;
         bool isApproved;
         bool isClaimed;
+    }
+
+    // L1-anchored validator lifecycle (paper SIV-B/SIV-C;
+    // validator_functions design note). The ABI of these structs must match
+    // IL2Oracle in L1Hub.sol.
+
+    struct ValidatorInput {
+        uint256 validatorID;
+        address validatorAddr;
+        uint256 stake;
+        PublicKey pubKey;
+    }
+
+    struct ReplacementRequest {
+        uint256 requestId;
+        uint256 targetValidatorID;
+        uint256 candidateValidatorID;
+        address candidateAddr;
+        uint256 candidateStake;
+        PublicKey candidatePubKey;
+        Account targetAccount;
+        uint256[] path;
+        uint256 leafIndex;
+        uint256 depth;
+    }
+
+    enum L2ToL1MsgType {
+        CHECKPOINT,
+        EXIT_REQUEST,
+        WITHDRAW_REQUEST,
+        REPLACEMENT_RESULT,
+        VALIDATOR_IMPORT_RESULT
+    }
+
+    struct L2ToL1Message {
+        L2ToL1MsgType msgType;
+        bytes payload;
     }
 
     VotingVerifier votingVerifier;
@@ -77,6 +137,18 @@ contract Oracle is MerkleTree {
 
     mapping(address => bool) private isValidator;
     mapping(uint256 => bool) private roundFinalized;
+
+    // L1 Hub anchoring (paper SIV-B/SIV-C). When l1Hub is unset the L2->L1
+    // messaging paths are no-ops, which keeps single-chain runs (and the
+    // L1-anchored baseline) working without a Hub.
+    address public owner;
+    address public l1Hub;
+    address private constant L2_TO_L1_SYSTEM_MESSENGER =
+        address(0x0000000000000000000000000000000000008008);
+
+    // Validators that requested an exit (by account leaf index); withdrawal
+    // is only possible after the exit request (paper SIV-C).
+    mapping(uint256 => bool) private exitRequested;
 
     // Deterministic batching (paper SIV-D): claims receive sequential
     // identifiers so that round r covers exactly [r*b, (r+1)*b - 1].
@@ -145,6 +217,15 @@ contract Oracle is MerkleTree {
     event Exiting(address indexed sender);
     event Withdrawn(address indexed sender);
 
+    event L1HubUpdated(address indexed l1Hub);
+    event ValidatorsImportedFromL1(uint256 count, uint256 newRoot);
+    event ReplacementFromL1Processed(
+        uint256 indexed requestId,
+        bool success,
+        uint256 newRoot
+    );
+    event L2ToL1MessageSent(L2ToL1MsgType msgType, bytes payload);
+
     // endregion
 
     constructor(
@@ -163,7 +244,138 @@ contract Oracle is MerkleTree {
         batchSize = _batchSize;
         aggregatorTimeout = _aggregatorTimeout;
         roundStartedAt = block.timestamp;
+        owner = msg.sender;
     }
+
+    // region l1 anchoring
+
+    function setL1Hub(address l1HubAddress) external {
+        require(msg.sender == owner, "only owner");
+        require(l1HubAddress != address(0), "l1 hub required");
+        l1Hub = l1HubAddress;
+        emit L1HubUpdated(l1HubAddress);
+    }
+
+    modifier onlyL1Hub() {
+        require(l1Hub != address(0), "l1 hub not set");
+        require(
+            msg.sender == L1AliasHelper.applyL1ToL2Alias(l1Hub),
+            "unauthorized L1 sender"
+        );
+        _;
+    }
+
+    /// @notice Import a batch of L1-registered validators into the L2
+    /// validator-state tree (paper SIV-B/SIV-C: registration starts on the
+    /// L1 Hub, which batches N registrations into one L1->L2 transaction).
+    function importValidatorsFromL1(
+        ValidatorInput[] calldata inputs
+    ) external onlyL1Hub {
+        uint256[] memory ids = new uint256[](inputs.length);
+        for (uint256 i = 0; i < inputs.length; i++) {
+            ValidatorInput calldata input = inputs[i];
+            require(
+                validators[input.validatorID] == address(0),
+                "validator already registered"
+            );
+            validators[input.validatorID] = input.validatorAddr;
+            validatorsList.push(input.validatorID);
+            isValidator[input.validatorAddr] = true;
+
+            Account memory account = Account(
+                getNextLeafIndex(),
+                input.pubKey,
+                input.stake
+            );
+            accounts[account.index] = input.validatorAddr;
+
+            uint[] memory leaf = new uint[](1);
+            leaf[0] = hashAccount(account);
+            insert(MiMC.hash(leaf));
+
+            ids[i] = input.validatorID;
+            emit ValidatorRegistered(
+                input.validatorAddr,
+                input.validatorID,
+                account.index,
+                account.pubKey,
+                account.balance
+            );
+        }
+
+        uint256 newRoot = getRoot();
+        emit ValidatorsImportedFromL1(inputs.length, newRoot);
+        _sendToL1(
+            L2ToL1MsgType.VALIDATOR_IMPORT_RESULT,
+            abi.encode(ids, newRoot)
+        );
+    }
+
+    /// @notice Apply an L1-initiated validator replacement (paper SIV-C:
+    /// the candidate's higher stake is locked on the L1 Hub before the L2
+    /// replacement is applied) and report the result back to L1.
+    function replaceValidatorFromL1(
+        ReplacementRequest calldata request
+    ) external onlyL1Hub {
+        bool success = request.candidateStake >
+            request.targetAccount.balance &&
+            request.path.length > 0 &&
+            request.path[0] == hashAccount(request.targetAccount) &&
+            verify(request.path, request.leafIndex, request.depth);
+
+        if (success) {
+            Account memory replaced = Account(
+                request.targetAccount.index,
+                request.candidatePubKey,
+                request.candidateStake
+            );
+            update(
+                hashAccount(replaced),
+                request.path,
+                request.leafIndex,
+                request.depth
+            );
+
+            address replacedAddr = accounts[request.targetAccount.index];
+            accounts[request.targetAccount.index] = request.candidateAddr;
+            validators[request.targetValidatorID] = request.candidateAddr;
+            isValidator[request.candidateAddr] = true;
+            emit Replaced(request.candidateAddr, replacedAddr);
+        }
+
+        uint256 newRoot = getRoot();
+        emit ReplacementFromL1Processed(request.requestId, success, newRoot);
+        _sendToL1(
+            L2ToL1MsgType.REPLACEMENT_RESULT,
+            abi.encode(
+                request.requestId,
+                success,
+                request.targetValidatorID,
+                request.candidateValidatorID,
+                request.candidateAddr,
+                request.candidateStake,
+                newRoot
+            )
+        );
+    }
+
+    /// @notice Send a typed message to the L1 Hub via the zkSync system
+    /// messenger. The oracle itself calls the system contract so the L2->L1
+    /// log key equals the oracle address, matching the Hub's proof check.
+    /// No-op when no Hub is configured (single-chain runs, baseline).
+    function _sendToL1(L2ToL1MsgType msgType, bytes memory payload) internal {
+        if (l1Hub == address(0)) {
+            return;
+        }
+        bytes memory message = abi.encode(
+            l1Hub,
+            abi.encode(L2ToL1Message({msgType: msgType, payload: payload}))
+        );
+        IL2ToL1SystemMessenger(L2_TO_L1_SYSTEM_MESSENGER).sendToL1(message);
+        emit L2ToL1MessageSent(msgType, payload);
+    }
+
+    // endregion
 
     // region 1.register
 
@@ -351,6 +563,13 @@ contract Oracle is MerkleTree {
         rotationReady = true;
         roundStartedAt = block.timestamp;
 
+        // Checkpoint the finalized validator-state root to L1 (paper SIV-B
+        // Step 5).
+        _sendToL1(
+            L2ToL1MsgType.CHECKPOINT,
+            abi.encode(roundId, postStateRoot)
+        );
+
         emit WiVoteSubmitted(index, validatorBits, honestBits, roundId, vote);
     }
 
@@ -397,6 +616,10 @@ contract Oracle is MerkleTree {
         emit Replaced(msg.sender, replacedAddr);
     }
 
+    /// @notice Request an exit from the validator set (paper SIV-C): the
+    /// exit is recorded as a validator-state transition on L2 and forwarded
+    /// to the L1 Hub, which starts the withdrawal waiting period. The stake
+    /// itself is locked (and later released) on L1.
     function exit(
         Account memory account,
         uint256[] memory path,
@@ -404,6 +627,7 @@ contract Oracle is MerkleTree {
         uint256 depth
     ) public {
         require(accounts[account.index] == msg.sender, "wrong sender address");
+        require(!exitRequested[account.index], "exit already requested");
 
         require(
             path[0] == hashAccount(account),
@@ -411,9 +635,22 @@ contract Oracle is MerkleTree {
         );
         require(verify(path, leafIndex, depth), "invalid merkle proof");
 
+        exitRequested[account.index] = true;
+
+        // validatorID == account leaf index by the registration convention
+        // used throughout this codebase.
+        _sendToL1(
+            L2ToL1MsgType.EXIT_REQUEST,
+            abi.encode(account.index, msg.sender, getRoot())
+        );
+
         emit Exiting(msg.sender);
     }
 
+    /// @notice Withdraw a validator's balance (paper SIV-C): only possible
+    /// after a recorded exit request. The leaf is zeroed on L2 and the
+    /// withdrawal is forwarded to the L1 Hub, which releases the stake after
+    /// the waiting period.
     function withdraw(
         Account memory account,
         uint256[] memory path,
@@ -421,6 +658,7 @@ contract Oracle is MerkleTree {
         uint256 depth
     ) public {
         require(accounts[account.index] == msg.sender, "wrong sender address");
+        require(exitRequested[account.index], "exit not requested");
 
         require(
             path[0] == hashAccount(account),
@@ -428,11 +666,21 @@ contract Oracle is MerkleTree {
         );
         require(verify(path, leafIndex, depth), "invalid merkle proof");
 
-        // payable(msg.sender).transfer(account.balance);
+        // Root under which this withdrawal was authorized (matches the last
+        // checkpoint; the leaf update below intentionally happens after).
+        uint256 rootAtWithdraw = getRoot();
+
         delete accounts[account.index];
+        delete exitRequested[account.index];
 
         Account memory empty = Account(account.index, account.pubKey, 0);
         update(hashAccount(empty), path, leafIndex, depth);
+
+        _sendToL1(
+            L2ToL1MsgType.WITHDRAW_REQUEST,
+            abi.encode(account.index, msg.sender, account.balance, rootAtWithdraw)
+        );
+
         emit Withdrawn(msg.sender);
     }
 

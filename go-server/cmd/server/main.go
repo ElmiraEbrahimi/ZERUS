@@ -97,6 +97,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize l2 contract event subscriber: %v", err)
 	}
+
+	// Optional L1 Hub relayer (paper SIV-B Step 5; F-01/F-02): forwards the
+	// oracle's L2->L1 messages to L1Hub.finalizeFromL2 when configured.
+	hubRelayer, err := handlers.NewOracleL2ToL1Relayer(context.Background(), cfg)
+	if err != nil {
+		log.Printf("L1 hub relayer disabled: %v", err)
+	} else if hubRelayer != nil {
+		l2Subscriber.SetL2ToL1Relayer(hubRelayer)
+		log.Printf("L1 hub relayer enabled (hub=%s)", cfg.L1HubContractAddress)
+	}
+
 	l2Subscriber.Start(context.Background())
 
 	counterHandler := handlers.NewCounterHandler(counterClient)

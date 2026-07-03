@@ -27,6 +27,13 @@ const l2PollInterval = 1 * time.Second
 //
 // This is intentionally L2-scoped so a future L1 subscriber can coexist
 // independently.
+// L2ToL1Relayer forwards an oracle L2->L1 message contained in the given L2
+// transaction to the L1 Hub (paper SIV-B Step 5; F-02). Implemented by
+// handlers.OracleL2ToL1Relayer; nil when L1 anchoring is not configured.
+type L2ToL1Relayer interface {
+	RelayTx(txHash common.Hash)
+}
+
 type L2ContractEventSubscriber struct {
 	engine *oracle_runtime.OracleEngine
 
@@ -34,11 +41,30 @@ type L2ContractEventSubscriber struct {
 	contractABI  abi.ABI
 	filterer     *eth.OracleFilterer
 
+	// relayer, when set, forwards L2->L1 messages produced by round
+	// finalization, exits, withdrawals, and L1-initiated import/replacement
+	// results to the L1 Hub.
+	relayer L2ToL1Relayer
+
 	mu        sync.Mutex
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	readyOnce sync.Once
 	readyCh   chan struct{}
+}
+
+// SetL2ToL1Relayer attaches the optional L1 Hub relayer (F-02).
+func (l *L2ContractEventSubscriber) SetL2ToL1Relayer(relayer L2ToL1Relayer) {
+	l.relayer = relayer
+}
+
+// relayL2ToL1 forwards the transaction's L2->L1 message asynchronously when
+// L1 anchoring is configured.
+func (l *L2ContractEventSubscriber) relayL2ToL1(evlog types.Log) {
+	if l == nil || l.relayer == nil {
+		return
+	}
+	go l.relayer.RelayTx(evlog.TxHash)
 }
 
 // NewL2ContractEventSubscriber constructs a subscriber bound to the configured L2 Oracle
@@ -335,6 +361,8 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 		l.handleClaimMinted(evlog)
 	case "Exiting":
 		l.handleExiting(evlog)
+		// Relay the EXIT_REQUEST message to L1 (F-02/F-16).
+		l.relayL2ToL1(evlog)
 	case "NewAggregator":
 		l.handleNewAggregator(evlog)
 	case "Registered":
@@ -347,8 +375,18 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 		l.handleValidatorRegistered(evlog)
 	case "WiVoteSubmitted":
 		l.handleWiVoteSubmitted(evlog)
+		// Round finalized: relay the CHECKPOINT message to L1 (F-02).
+		l.relayL2ToL1(evlog)
 	case "Withdrawn":
 		l.handleWithdrawn(evlog)
+		// Relay the WITHDRAW_REQUEST message to L1 (F-02/F-16).
+		l.relayL2ToL1(evlog)
+	case "ValidatorsImportedFromL1":
+		// Relay the VALIDATOR_IMPORT_RESULT message to L1 (F-01).
+		l.relayL2ToL1(evlog)
+	case "ReplacementFromL1Processed":
+		// Relay the REPLACEMENT_RESULT message to L1 (F-01).
+		l.relayL2ToL1(evlog)
 	}
 }
 

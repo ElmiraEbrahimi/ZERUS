@@ -38,6 +38,11 @@ type Config struct {
 	L2MessengerContractAddress   string `env:"L2_MESSENGER_CONTRACT_ADDRESS"`
 	L1MailboxAddress             string `env:"L1_MAILBOX_ADDRESS"`
 	L1UseDirectMessaging         bool   `env:"L1_USE_DIRECT_MESSAGING" default:"false"`
+	// L1HubContractAddress enables L1 anchoring (paper SIV-B/SIV-C): when
+	// set together with L1_RPC_URL, the runtime relays the oracle's L2->L1
+	// messages (checkpoints, exits, withdrawals, import/replacement
+	// results) to the L1 Hub via finalizeFromL2 (F-01/F-02).
+	L1HubContractAddress string `env:"L1_HUB_CONTRACT_ADDRESS"`
 
 	BlockchainURL string `env:"ZKSYNC_RPC_URL,required"`
 

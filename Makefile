@@ -39,7 +39,7 @@ down:
 	cd local-setup && ./clear.sh
 
 .PHONY: deploy
-deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle deploy-messengers
+deploy: run-index deploy-counter deploy-merkle-verifier deploy-votingbatch-verifier deploy-merkle-tree deploy-oracle deploy-messengers deploy-l1hub-if-configured
 
 .PHONY: deploy-counter deploy-l2-messenger deploy-l1-messenger configure-l2-messenger deploy-messengers deploy-messengers-if-configured abigen-messengers ensure-l1-mailbox
 deploy-counter:
@@ -168,6 +168,66 @@ deploy-messengers-if-configured:
 	  $(MAKE) deploy-l1-messenger configure-l2-messenger
 
 deploy-messengers: deploy-l2-messenger deploy-l1-messenger configure-l2-messenger abigen-messengers
+
+.PHONY: deploy-l1hub deploy-l1hub-if-configured
+# Deploy the L1 Hub (validator staking + L1<->L2 anchoring, paper SIV-B/SIV-C)
+# to L1, link the L2 Oracle to it (setL1Hub), and regenerate Go bindings.
+deploy-l1hub: ensure-l1-mailbox
+	$(ANNOUNCE_TARGET)
+	@echo "Deploying L1Hub to L1 via forge..."
+	@cd contracts && set -a && . ../.env && set +a && \
+	  gas_price="$${L1_GAS_PRICE_WEI:-1000000000}"; \
+	  forge script script/DeployL1Hub.s.sol --rpc-url "$$L1_RPC_URL" \
+	    --private-key "$$ZKSYNC_PRIVATE_KEY" --legacy --gas-price "$$gas_price" --broadcast \
+	    2>&1 | tee /tmp/forge_l1hub_deploy.log
+
+	@addr=$$(awk '/L1Hub deployed at/ {print $$4}' /tmp/forge_l1hub_deploy.log | tail -n1); \
+	if [ -z "$$addr" ]; then \
+		echo "ERROR: deployment succeeded but could not extract L1Hub address from forge output" >&2; \
+		exit 1; \
+	fi; \
+	  echo "Detected L1Hub contract address: $$addr"; \
+	if [ -f .env ]; then \
+		awk -v addr="$$addr" 'BEGIN{updated=0} \
+		/^L1_HUB_CONTRACT_ADDRESS=/{print "L1_HUB_CONTRACT_ADDRESS=" addr; updated=1; next} \
+		{print} \
+		END{if(!updated) print "L1_HUB_CONTRACT_ADDRESS=" addr}' .env > .env.tmp && mv .env.tmp .env; \
+	else \
+		echo "L1_HUB_CONTRACT_ADDRESS=$$addr" > .env; \
+	fi; \
+	  echo "Updated .env with L1_HUB_CONTRACT_ADDRESS=$$addr"
+
+	@echo "Linking Oracle to L1Hub (setL1Hub)..."
+	@set -a && . ./.env && set +a && \
+	if [ -z "$$ORACLE_CONTRACT_ADDRESS" ]; then \
+		echo "WARNING: ORACLE_CONTRACT_ADDRESS not set; run 'make deploy-oracle' first, then re-run 'make deploy-l1hub'." >&2; \
+		exit 0; \
+	fi; \
+	  cast send "$$ORACLE_CONTRACT_ADDRESS" "setL1Hub(address)" "$$L1_HUB_CONTRACT_ADDRESS" \
+	    --rpc-url "$$ZKSYNC_RPC_URL" --private-key "$$ZKSYNC_PRIVATE_KEY" >/dev/null && \
+	  echo "Oracle.setL1Hub($$L1_HUB_CONTRACT_ADDRESS) done"
+
+	@echo "Generating Go bindings via abigen..."
+	@cd contracts && forge build --extra-output-files abi >/dev/null
+	@abigen \
+	  --abi contracts/out/L1Hub.sol/L1Hub.abi.json \
+	  --pkg eth \
+	  --type L1Hub \
+	  --out go-server/internal/eth/l1hub_abigen.go
+	@echo "Regenerated go-server/internal/eth/l1hub_abigen.go"
+
+deploy-l1hub-if-configured:
+	$(ANNOUNCE_TARGET)
+	@if [ ! -f .env ]; then \
+		echo "Skipping L1Hub deploy (.env not found)"; \
+		exit 0; \
+	fi
+	@set -a && . ./.env && set +a && \
+	if [ -z "$$L1_MAILBOX_ADDRESS" ]; then \
+		echo "Skipping L1Hub deploy (L1_MAILBOX_ADDRESS not set)"; \
+		exit 0; \
+	fi; \
+	  $(MAKE) deploy-l1hub
 
 ensure-l1-mailbox:
 	$(ANNOUNCE_TARGET)
