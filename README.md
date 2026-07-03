@@ -5,9 +5,13 @@ contract and the on-chain Oracle flow.
 
 ## Prerequisites
 
+Pinned toolchain (paper §V):
+
 - Docker + Docker Compose
-- Foundry + foundry-zksync
-- Go 1.24.x
+- Foundry `forge` 1.3.5 with the foundry-zksync fork (v0.1.5); Solidity is
+  pinned to 0.8.30 in `contracts/foundry.toml`
+- Go 1.24.x (gnark v0.14.0, gnark-crypto v0.19.0, go-ethereum v1.16.7 are
+  pinned in `go-server/go.mod`)
 - abigen (only needed for deploy targets that regenerate bindings)
 
 ## Repository Layout
