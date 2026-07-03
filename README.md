@@ -248,6 +248,14 @@ make server
 ```
 
 Terminal 2 (requests)
+
+> A verification round finalizes (and mints accepted claims) only after
+> `BATCH_SIZE` claims have been submitted (paper SIV-D: round `r` covers claim
+> identifiers `[r*b, (r+1)*b-1]`). For this single burn/withdraw walkthrough
+> set `BATCH_SIZE=1` in `.env` before `make up-deploy`; with a larger batch
+> size, repeat the burn and withdraw calls `BATCH_SIZE` times — the balance
+> credits when the round's Aggregating proof is verified on-chain.
+
 ```sh
 curl -X POST http://localhost:18000/users/default/register -H "Content-Type: application/json"
 curl -X POST http://localhost:18000/validators/register -H "Content-Type: application/json"

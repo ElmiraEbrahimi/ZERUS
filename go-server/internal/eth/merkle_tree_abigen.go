@@ -31,7 +31,7 @@ var (
 
 // MerkleTreeMetaData contains all meta data concerning the MerkleTree contract.
 var MerkleTreeMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"_levels\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"ZERO_VALUE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"computeRootFromPath\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"getLevels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getNextLeafIndex\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoot\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"hashLeftRight\",\"inputs\":[{\"name\":\"left\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"right\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"levels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verify\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"zeros\",\"inputs\":[{\"name\":\"i\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"}]",
+	ABI: "[{\"type\":\"constructor\",\"inputs\":[{\"name\":\"_levels\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"nonpayable\"},{\"type\":\"function\",\"name\":\"MAX_LEVELS\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"ZERO_VALUE\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"computeRootFromPath\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"getLevels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getNextLeafIndex\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"getRoot\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"hashLeftRight\",\"inputs\":[{\"name\":\"left\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"right\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"leafSum\",\"inputs\":[{\"name\":\"leaf\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"},{\"type\":\"function\",\"name\":\"levels\",\"inputs\":[],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verify\",\"inputs\":[{\"name\":\"path\",\"type\":\"uint256[]\",\"internalType\":\"uint256[]\"},{\"name\":\"leafIndex\",\"type\":\"uint256\",\"internalType\":\"uint256\"},{\"name\":\"depth\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"bool\",\"internalType\":\"bool\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"zeros\",\"inputs\":[{\"name\":\"i\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"outputs\":[{\"name\":\"\",\"type\":\"uint256\",\"internalType\":\"uint256\"}],\"stateMutability\":\"pure\"}]",
 }
 
 // MerkleTreeABI is the input ABI used to generate the binding from.
@@ -178,6 +178,37 @@ func (_MerkleTree *MerkleTreeTransactorRaw) Transfer(opts *bind.TransactOpts) (*
 // Transact invokes the (paid) contract method with params as input values.
 func (_MerkleTree *MerkleTreeTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
 	return _MerkleTree.Contract.contract.Transact(opts, method, params...)
+}
+
+// MAXLEVELS is a free data retrieval call binding the contract method 0x6702c7bf.
+//
+// Solidity: function MAX_LEVELS() view returns(uint256)
+func (_MerkleTree *MerkleTreeCaller) MAXLEVELS(opts *bind.CallOpts) (*big.Int, error) {
+	var out []interface{}
+	err := _MerkleTree.contract.Call(opts, &out, "MAX_LEVELS")
+
+	if err != nil {
+		return *new(*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+
+	return out0, err
+
+}
+
+// MAXLEVELS is a free data retrieval call binding the contract method 0x6702c7bf.
+//
+// Solidity: function MAX_LEVELS() view returns(uint256)
+func (_MerkleTree *MerkleTreeSession) MAXLEVELS() (*big.Int, error) {
+	return _MerkleTree.Contract.MAXLEVELS(&_MerkleTree.CallOpts)
+}
+
+// MAXLEVELS is a free data retrieval call binding the contract method 0x6702c7bf.
+//
+// Solidity: function MAX_LEVELS() view returns(uint256)
+func (_MerkleTree *MerkleTreeCallerSession) MAXLEVELS() (*big.Int, error) {
+	return _MerkleTree.Contract.MAXLEVELS(&_MerkleTree.CallOpts)
 }
 
 // ZEROVALUE is a free data retrieval call binding the contract method 0xec732959.
@@ -364,6 +395,37 @@ func (_MerkleTree *MerkleTreeSession) HashLeftRight(left *big.Int, right *big.In
 // Solidity: function hashLeftRight(uint256 left, uint256 right) pure returns(uint256)
 func (_MerkleTree *MerkleTreeCallerSession) HashLeftRight(left *big.Int, right *big.Int) (*big.Int, error) {
 	return _MerkleTree.Contract.HashLeftRight(&_MerkleTree.CallOpts, left, right)
+}
+
+// LeafSum is a free data retrieval call binding the contract method 0x78014d33.
+//
+// Solidity: function leafSum(uint256 leaf) pure returns(uint256)
+func (_MerkleTree *MerkleTreeCaller) LeafSum(opts *bind.CallOpts, leaf *big.Int) (*big.Int, error) {
+	var out []interface{}
+	err := _MerkleTree.contract.Call(opts, &out, "leafSum", leaf)
+
+	if err != nil {
+		return *new(*big.Int), err
+	}
+
+	out0 := *abi.ConvertType(out[0], new(*big.Int)).(**big.Int)
+
+	return out0, err
+
+}
+
+// LeafSum is a free data retrieval call binding the contract method 0x78014d33.
+//
+// Solidity: function leafSum(uint256 leaf) pure returns(uint256)
+func (_MerkleTree *MerkleTreeSession) LeafSum(leaf *big.Int) (*big.Int, error) {
+	return _MerkleTree.Contract.LeafSum(&_MerkleTree.CallOpts, leaf)
+}
+
+// LeafSum is a free data retrieval call binding the contract method 0x78014d33.
+//
+// Solidity: function leafSum(uint256 leaf) pure returns(uint256)
+func (_MerkleTree *MerkleTreeCallerSession) LeafSum(leaf *big.Int) (*big.Int, error) {
+	return _MerkleTree.Contract.LeafSum(&_MerkleTree.CallOpts, leaf)
 }
 
 // Levels is a free data retrieval call binding the contract method 0x4ecf518b.
