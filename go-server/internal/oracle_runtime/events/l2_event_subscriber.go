@@ -44,9 +44,11 @@ type L2ToL1Relayer interface {
 type L2ContractEventSubscriber struct {
 	engine *oracle_runtime.OracleEngine
 
-	contractAddr common.Address
-	contractABI  abi.ABI
-	filterer     *eth.OracleFilterer
+	contractAddr  common.Address
+	contractABI   abi.ABI
+	filterer      *eth.OracleFilterer
+	receiptLogMu  sync.Mutex
+	receiptLogged map[string]struct{}
 
 	// relayer, when set, forwards L2->L1 messages produced by round
 	// finalization, exits, withdrawals, and L1-initiated import/replacement
@@ -109,11 +111,12 @@ func NewL2ContractEventSubscriber(engine *oracle_runtime.OracleEngine) (*L2Contr
 	}
 
 	return &L2ContractEventSubscriber{
-		engine:       engine,
-		contractAddr: contractAddr,
-		contractABI:  parsedABI,
-		filterer:     filterer,
-		readyCh:      make(chan struct{}),
+		engine:        engine,
+		contractAddr:  contractAddr,
+		contractABI:   parsedABI,
+		filterer:      filterer,
+		readyCh:       make(chan struct{}),
+		receiptLogged: make(map[string]struct{}),
 	}, nil
 }
 
@@ -403,12 +406,44 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 		// Relay the WITHDRAW_REQUEST message to L1 (F-02/F-16).
 		l.relayL2ToL1(evlog)
 	case "ValidatorsImportedFromL1":
+		l.logL1ToL2ExecutionReceipt("L2 validator import execution from L1", evlog)
 		// Relay the VALIDATOR_IMPORT_RESULT message to L1 (F-01).
 		l.relayL2ToL1(evlog)
 	case "ReplacementFromL1Processed":
+		l.logL1ToL2ExecutionReceipt("L2 validator replacement execution from L1", evlog)
 		// Relay the REPLACEMENT_RESULT message to L1 (F-01).
 		l.relayL2ToL1(evlog)
 	}
+}
+
+func (l *L2ContractEventSubscriber) logL1ToL2ExecutionReceipt(label string, evlog types.Log) {
+	if l == nil || l.engine == nil || l.engine.EthClient == nil {
+		return
+	}
+
+	key := label + ":" + evlog.TxHash.Hex()
+	l.receiptLogMu.Lock()
+	if l.receiptLogged == nil {
+		l.receiptLogged = make(map[string]struct{})
+	}
+	if _, ok := l.receiptLogged[key]; ok {
+		l.receiptLogMu.Unlock()
+		return
+	}
+	l.receiptLogged[key] = struct{}{}
+	l.receiptLogMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		receipt, err := l.engine.EthClient.TransactionReceipt(ctx, evlog.TxHash)
+		if err != nil {
+			log.Printf("%s tx: fetch L2 receipt failed (hash=%s): %v", label, evlog.TxHash.Hex(), err)
+			return
+		}
+		eth.LogReceipt(label, receipt)
+	}()
 }
 
 func (l *L2ContractEventSubscriber) handleBurnSubmitted(evlog types.Log) {

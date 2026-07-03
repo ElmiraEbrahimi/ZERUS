@@ -12,6 +12,7 @@ import (
 	"l2alchemy/internal/config"
 	"l2alchemy/internal/eth"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -91,7 +92,7 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 		return
 	}
 
-	logCandidate, err := waitForL2ToL1Log(ctx, r.l2.Eth.Client(), txHash)
+	logCandidate, err := waitForL2ToL1LogValue(ctx, r.l2.Eth.Client(), txHash, crypto.Keccak256Hash(message).Hex())
 	if err != nil {
 		log.Printf("oracle relayer: wait for L2->L1 log failed tx=%s: %v", txHash.Hex(), err)
 		return
@@ -129,6 +130,7 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 			time.Sleep(l2ToL1RelayPollInterval)
 			continue
 		}
+		l2LogIndex := proof.ID
 
 		txNumber := logCandidate.L2TxNumberBatch
 		if proof.Log != nil {
@@ -157,7 +159,7 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 			auth,
 			message,
 			new(big.Int).SetUint64(proofBlockNumber),
-			new(big.Int).SetUint64(uint64(logCandidate.LogIndex)),
+			new(big.Int).SetUint64(l2LogIndex),
 			uint16(txNumber),
 			proofBytes,
 		)
@@ -168,6 +170,7 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 				log.Printf("oracle relayer: wait finalizeFromL2 receipt failed: %v", err)
 				return
 			}
+			eth.LogTxReceipt(l1FinalizeLabel(message), tx, receipt)
 			if receipt.Status == 1 {
 				log.Printf("oracle relayer: message finalized on L1 (l2_tx=%s)", txHash.Hex())
 			} else {
@@ -181,17 +184,32 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 			log.Printf("oracle relayer: message already consumed (l2_tx=%s)", txHash.Hex())
 			return
 		}
-		// A deterministic on-chain revert (e.g. "unknown root", "validator
-		// mismatch", "withdraw delay not elapsed") cannot succeed by
-		// retrying the same message against the same state: give up once
-		// and leave the message for a later replay (the Hub deduplicates by
-		// message hash, so re-relaying after the state changes is safe).
 		if strings.Contains(errMsg, "execution reverted") || strings.Contains(errMsg, "revert") {
+			if shouldRetryL1FinalizeRevert(message, errMsg) {
+				log.Printf("oracle relayer: finalizeFromL2 transient revert (attempt=%d), retrying: %v", attempt, err)
+				time.Sleep(l2ToL1RelayPollInterval)
+				continue
+			}
 			log.Printf("oracle relayer: finalizeFromL2 reverted, not retrying (l2_tx=%s): %v", txHash.Hex(), err)
 			return
 		}
 		log.Printf("oracle relayer: finalizeFromL2 failed (attempt=%d), retrying: %v", attempt, err)
 		time.Sleep(l2ToL1RelayPollInterval)
+	}
+}
+
+func shouldRetryL1FinalizeRevert(message []byte, errMsg string) bool {
+	msgType, ok := l2ToL1MessageType(message)
+	if !ok {
+		return false
+	}
+	switch msgType {
+	case 1, 2: // EXIT_REQUEST or WITHDRAW_REQUEST can race checkpoint/exit finalization.
+		return strings.Contains(errMsg, "unknown root") ||
+			strings.Contains(errMsg, "exit not finalized") ||
+			strings.Contains(errMsg, "withdraw delay not elapsed")
+	default:
+		return false
 	}
 }
 
@@ -226,6 +244,69 @@ func (r *OracleL2ToL1Relayer) messageBytes(ctx context.Context, txHash common.Ha
 		return lg.Data[64 : 64+length], nil
 	}
 	return nil, fmt.Errorf("no oracle L1MessageSent event in tx %s", txHash.Hex())
+}
+
+func l1FinalizeLabel(message []byte) string {
+	msgType, ok := l2ToL1MessageType(message)
+	if !ok {
+		return "L2->L1 message finalization on L1"
+	}
+	switch msgType {
+	case 0:
+		return "L2->L1 checkpoint finalization on L1"
+	case 1:
+		return "L2->L1 validator exit finalization on L1"
+	case 2:
+		return "L2->L1 validator withdraw finalization on L1"
+	case 3:
+		return "L2->L1 validator replacement result finalization on L1"
+	case 4:
+		return "L2->L1 validator import result finalization on L1"
+	default:
+		return "L2->L1 message finalization on L1"
+	}
+}
+
+func l2ToL1MessageType(message []byte) (uint8, bool) {
+	addressTy, err := abi.NewType("address", "", nil)
+	if err != nil {
+		return 0, false
+	}
+	bytesTy, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		return 0, false
+	}
+	args := abi.Arguments{
+		{Type: addressTy},
+		{Type: bytesTy},
+	}
+	values, err := args.Unpack(message)
+	if err != nil || len(values) != 2 {
+		return 0, false
+	}
+	payload, ok := values[1].([]byte)
+	if !ok || len(payload) < 32 {
+		return 0, false
+	}
+	msgType := new(big.Int).SetBytes(payload[:32])
+	// abi.encode(L2ToL1Message) where the struct contains dynamic bytes is
+	// encoded as a single dynamic tuple argument. In that layout the first
+	// word is the tuple offset, and the message type is the first word at
+	// that offset. Older/simpler payloads may start directly with msgType.
+	if msgType.Uint64() > 4 {
+		if !msgType.IsUint64() {
+			return 0, false
+		}
+		offset := int(msgType.Uint64())
+		if offset < 0 || offset+32 > len(payload) {
+			return 0, false
+		}
+		msgType = new(big.Int).SetBytes(payload[offset : offset+32])
+	}
+	if !msgType.IsUint64() || msgType.Uint64() > 255 {
+		return 0, false
+	}
+	return uint8(msgType.Uint64()), true
 }
 
 func (r *OracleL2ToL1Relayer) l1Transactor(ctx context.Context) (*bind.TransactOpts, error) {

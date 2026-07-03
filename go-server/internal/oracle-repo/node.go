@@ -1405,7 +1405,7 @@ func (n *Node) publishCommitmentRootTx(root *big.Int, dfsRef string) error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	bc.LogTxReceipt("publish commitment root", tx, receipt)
+	bc.LogTxReceipt("L2 publish DFS commitment root", tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully published commitment root (node=%v)\n", n.ID)
 	} else {
@@ -1453,7 +1453,7 @@ func (n *Node) aggregatorSubmitWiVoteTx(index *big.Int, uniqueReqID *big.Int, ba
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	bc.LogTxReceipt("submit wivote", tx, receipt)
+	bc.LogTxReceipt("L2 submitWiVote batch finalization", tx, receipt)
 
 	if receipt.Status == 1 {
 		fmt.Printf("successfully submitted wivote (node=%v)\n", n.ID)
@@ -1594,6 +1594,140 @@ func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	return nil
 }
 
+func (n *Node) RequestReplacementFromL1Tx(replaceWithAccountID uint64) error {
+	fmt.Printf("requesting L1 replacement (node=%v)...\n", n.ID)
+
+	if n.cfg == nil || n.cfg.L1RPCURL == "" || n.cfg.L1HubContractAddress == "" {
+		return n.ReplaceAccountTx(replaceWithAccountID)
+	}
+	if err := n.awaitStateSync(30 * time.Second); err != nil {
+		return fmt.Errorf("l1 replacement: %w", err)
+	}
+
+	targetAccount, err := n.state.ReadAccount(replaceWithAccountID)
+	if err != nil {
+		return fmt.Errorf("read replacement target account at index %d: %w", replaceWithAccountID, err)
+	}
+	_, path, err := n.state.MerkleProofBytes(targetAccount.Index.Uint64())
+	if err != nil {
+		return fmt.Errorf("replacement target merkle proof (index=%d): %w", targetAccount.Index.Uint64(), err)
+	}
+
+	candidateStake := new(big.Int).Add(targetAccount.Balance, big.NewInt(1))
+	l1Client, err := bc.NewChainClient(context.Background(), n.cfg.L1RPCURL, n.cfg.L1ChainID, n.cfg.NodePK)
+	if err != nil {
+		return fmt.Errorf("init L1 replacement client: %w", err)
+	}
+	if n.cfg.L1GasPriceWei > 0 {
+		l1Client.GasPriceOverride = big.NewInt(n.cfg.L1GasPriceWei)
+	}
+	hub, err := bc.NewL1Hub(common.HexToAddress(n.cfg.L1HubContractAddress), l1Client.Eth)
+	if err != nil {
+		return fmt.Errorf("bind L1Hub: %w", err)
+	}
+	if err := waitL1ValidatorActive(context.Background(), hub, targetAccount.Index, 90*time.Second); err != nil {
+		return fmt.Errorf("wait replacement target active on L1: %w", err)
+	}
+
+	feeValue := l1ToL2RequestValue(n.cfg.L1L2ValueWei)
+	totalValue := new(big.Int).Add(candidateStake, feeValue)
+	auth, err := newL1HubNodeTransactor(context.Background(), l1Client, totalValue)
+	if err != nil {
+		return fmt.Errorf("L1 replacement auth: %w", err)
+	}
+
+	params := bc.L1HubReplacementParams{
+		TargetValidatorID:    new(big.Int).Set(targetAccount.Index),
+		CandidateValidatorID: big.NewInt(int64(n.ID)),
+		CandidatePubKey: bc.L1HubPublicKey{
+			X: n.Account.PublicKey.A.X.BigInt(new(big.Int)),
+			Y: n.Account.PublicKey.A.Y.BigInt(new(big.Int)),
+		},
+		CandidateStake:  candidateStake,
+		TargetLeafIndex: new(big.Int).Set(targetAccount.Index),
+		Path:            path[:],
+		Depth:           big.NewInt(int64(n.cfg.SparseTreeDepth)),
+	}
+
+	tx, err := hub.RequestReplacementL1(
+		auth,
+		params,
+		big.NewInt(30_000_000),
+		big.NewInt(800),
+		l1Client.From,
+	)
+	if err != nil {
+		return fmt.Errorf("request replacement on L1: %w", err)
+	}
+	receipt, err := bc.WaitMinedAndLogTxReceipt(
+		context.Background(),
+		l1Client.Eth,
+		fmt.Sprintf("L1->L2 validator replacement request index=%d", targetAccount.Index.Uint64()),
+		tx,
+	)
+	if err != nil {
+		return fmt.Errorf("wait L1 replacement request: %w", err)
+	}
+	if receipt.Status != 1 {
+		return fmt.Errorf("L1 replacement request reverted (tx=%s)", tx.Hash().Hex())
+	}
+	return nil
+}
+
+func waitL1ValidatorActive(ctx context.Context, hub *bc.L1Hub, validatorID *big.Int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		record, err := hub.Validators(&bind.CallOpts{Context: ctx}, validatorID)
+		if err != nil {
+			return err
+		}
+		if record.Active {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("validator %s is not active after %s", validatorID.String(), timeout)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func newL1HubNodeTransactor(ctx context.Context, chain *bc.ChainClient, valueWei *big.Int) (*bind.TransactOpts, error) {
+	nonce, err := chain.Eth.PendingNonceAt(ctx, chain.From)
+	if err != nil {
+		return nil, fmt.Errorf("get nonce: %w", err)
+	}
+	gasPrice := chain.GasPriceOverride
+	if gasPrice == nil || gasPrice.Sign() == 0 {
+		gasPrice, err = chain.Eth.SuggestGasPrice(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("suggest gas price: %w", err)
+		}
+	}
+	auth, err := bind.NewKeyedTransactorWithChainID(chain.PrivKey, chain.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("new transactor: %w", err)
+	}
+	if valueWei == nil {
+		valueWei = big.NewInt(0)
+	}
+	auth.From = chain.From
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = valueWei
+	auth.GasPrice = gasPrice
+	return auth, nil
+}
+
+func l1ToL2RequestValue(raw string) *big.Int {
+	if strings.TrimSpace(raw) == "" {
+		return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	}
+	v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
+	if !ok || v.Sign() < 0 {
+		return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	}
+	return v
+}
+
 func (n *Node) ExitTx() error {
 	fmt.Printf("exiting account (node=%v)...\n", n.ID)
 
@@ -1645,7 +1779,7 @@ func (n *Node) ExitTx() error {
 	receipt, err := bc.WaitMinedAndLogTxReceipt(
 		context.Background(),
 		n.ethClient,
-		fmt.Sprintf("exit account index=%d", account.Index.Uint64()),
+		fmt.Sprintf("L2 validator exit request index=%d", account.Index.Uint64()),
 		tx,
 	)
 	if err != nil {
@@ -1715,7 +1849,7 @@ func (n *Node) WithdrawAccountTx() error {
 	receipt, err := bc.WaitMinedAndLogTxReceipt(
 		context.Background(),
 		n.ethClient,
-		fmt.Sprintf("withdraw account index=%d", account.Index.Uint64()),
+		fmt.Sprintf("L2 validator withdraw request index=%d", account.Index.Uint64()),
 		tx,
 	)
 	if err != nil {

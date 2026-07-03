@@ -206,6 +206,22 @@ Each configuration's raw CSV logs are copied to
 `eval-results/<timestamp>/summary.csv` (per-metric count/mean/std by
 configuration and measurement source).
 
+The transaction CSV separates L1, L2, and cross-layer message costs. In
+particular, validator lifecycle measurements are logged as distinct rows for
+L1 staking/requests, L2 execution, and L1 finalization:
+
+- `L1 validator stake registration node=<id>`: stake registration on the L1 Hub.
+- `L1->L2 validator import request`: L1 request that imports validators to L2.
+- `L2 validator import execution from L1`: L2 execution of the import.
+- `L2->L1 validator import result finalization on L1`: L1 finalization of the import result.
+- `L2 submitWiVote batch finalization`: L2 batch-finalization transaction.
+- `L2->L1 checkpoint finalization on L1`: L1 finalization of the submitted checkpoint.
+- `L1->L2 validator replacement request index=<id>`: L1 replacement request.
+- `L2 validator replacement execution from L1`: L2 execution of replacement.
+- `L2->L1 validator replacement result finalization on L1`: L1 finalization of replacement result.
+- `L2 validator exit request index=<id>` and `L2 validator withdraw request index=<id>`: L2 validator lifecycle requests.
+- `L2->L1 validator exit finalization on L1` and `L2->L1 validator withdraw finalization on L1`: L1 finalization of the corresponding L2 messages.
+
 ## L1/L2 Messaging Demo
 
 `make deploy`/`make deploy-messengers` auto-populate `L1_MAILBOX_ADDRESS`
@@ -286,12 +302,9 @@ curl -X POST http://localhost:18000/validators/withdraw -H "Content-Type: applic
 With `L1_HUB_CONTRACT_ADDRESS` configured (set automatically by
 `make deploy`), every finalized round's `CHECKPOINT` is relayed to the L1
 Hub and consumed by `finalizeFromL2` with a zkSync inclusion proof. The
-`EXIT_REQUEST`/`WITHDRAW_REQUEST` messages emitted by the validator
-exit/withdraw calls above finalize on the Hub only for validators that
-were registered through the L1 lifecycle (`L1Hub.registerValidatorL1` →
-batched import); in this single-chain demo the relayer logs a single
-`finalizeFromL2 reverted, not retrying` line for them and continues —
-that is expected, not a failure.
+validator import, replacement, exit, and withdrawal flows are also relayed
+and logged as separate L1/L2 CSV rows so lifecycle costs can be reported
+without mixing them into the base L2 operation rows.
 
 ### Troubleshooting
 

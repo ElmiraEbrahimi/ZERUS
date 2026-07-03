@@ -8,6 +8,8 @@ logger_pid=""
 server_tmp=""
 server_port=18001
 sleep_base=3
+relayer_drain_seconds="${RELAYER_DRAIN_SECONDS:-45}"
+sim_hub_withdraw_delay="${SIM_HUB_WITHDRAW_DELAY:-}"
 script_pgid="$(ps -o pgid= $$ | tr -d ' ')"
 
 calc_sleep_with_nodes() {
@@ -289,6 +291,17 @@ if [ "$batch_size_set" -eq 1 ]; then
 		updates+=("BATCH_SIZE=$batch_size_arg")
 	fi
 fi
+if [ -n "$sim_hub_withdraw_delay" ]; then
+	if ! [[ "$sim_hub_withdraw_delay" =~ ^[0-9]+$ ]]; then
+		echo "SIM_HUB_WITHDRAW_DELAY must be an integer: $sim_hub_withdraw_delay"
+		exit 1
+	fi
+	current_hub_withdraw_delay="$(get_env_var "HUB_WITHDRAW_DELAY" "$env_file")"
+	if [ "$current_hub_withdraw_delay" != "$sim_hub_withdraw_delay" ]; then
+		update_env_var "HUB_WITHDRAW_DELAY" "$sim_hub_withdraw_delay" "$env_file"
+		updates+=("HUB_WITHDRAW_DELAY=$sim_hub_withdraw_delay")
+	fi
+fi
 
 if [ "${#updates[@]}" -gt 0 ]; then
 	echo ".env updated: ${updates[*]}"
@@ -371,6 +384,7 @@ run() {
 	curl -X POST "http://localhost:${server_port}/validators/replace" -H "Content-Type: application/json" -d '{"node_id":0,"replace_with_account_id":1}'
 	curl -X POST "http://localhost:${server_port}/validators/exit" -H "Content-Type: application/json" -d '{"node_id":0}'
 	curl -X POST "http://localhost:${server_port}/validators/withdraw" -H "Content-Type: application/json" -d '{"node_id":0}'
+	sleep "$relayer_drain_seconds"
 	echo "\n"
 
 	cleanup_server

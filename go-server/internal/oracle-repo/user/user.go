@@ -351,7 +351,7 @@ func (u *User) RegisterUserTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("wait for tx mined: %w", err)
 	}
-	bc.LogTxReceipt(fmt.Sprintf("register user name=%s", u.Name), tx, receipt)
+	bc.LogTxReceipt(fmt.Sprintf("L2 user registration name=%s", u.Name), tx, receipt)
 	if receipt.Status != 1 {
 		return "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
@@ -455,7 +455,7 @@ func (u *User) BurnTx() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
-	bc.LogTxReceipt(fmt.Sprintf("burn user=%s", u.Name), tx, receipt)
+	bc.LogTxReceipt(fmt.Sprintf("L2 burn request user=%s", u.Name), tx, receipt)
 	if receipt.Status != 1 {
 		return "", "", fmt.Errorf("transaction reverted (tx=%s)", tx.Hash().Hex())
 	}
@@ -708,7 +708,7 @@ func (u *User) WithdrawTx() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to wait for transaction mining: %w", err)
 	}
-	bc.LogTxReceipt(fmt.Sprintf("claim user=%s", u.Name), tx, receipt)
+	bc.LogTxReceipt(fmt.Sprintf("L2 claim request user=%s", u.Name), tx, receipt)
 	if receipt.Status == 1 {
 		log.Printf("successfully sent claim tx (user=%v)", u.Name)
 	} else {

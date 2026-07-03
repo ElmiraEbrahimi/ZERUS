@@ -4,15 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	bc "l2alchemy/internal/eth"
 	"l2alchemy/internal/oracle_runtime"
+
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // OracleHandler serves endpoints backed by the oracle runtime engine.
@@ -33,6 +39,7 @@ type registerUserResponse struct {
 type registerValidatorsResponse struct {
 	NodeIDs []uint `json:"node_ids"`
 	Count   int    `json:"count"`
+	Mode    string `json:"mode,omitempty"`
 }
 
 type burnResponse struct {
@@ -122,6 +129,19 @@ func (h *OracleHandler) RegisterValidators(w http.ResponseWriter, r *http.Reques
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
 	nodeIDs := make([]uint, 0, len(ids))
+	mode := "l2-direct"
+	if h.engine.Cfg != nil && h.engine.Cfg.L1RPCURL != "" && h.engine.Cfg.L1HubContractAddress != "" {
+		registered, err := h.registerValidatorsViaL1Hub(r.Context(), ids)
+		if err != nil {
+			log.Printf("register validators via L1Hub failed: %v", err)
+			http.Error(w, "failed to register validators through L1 hub", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(registerValidatorsResponse{NodeIDs: registered, Count: len(registered), Mode: "l1-hub"})
+		return
+	}
+
 	for _, id := range ids {
 		node := oracle.Nodes[id]
 		if node == nil {
@@ -136,7 +156,127 @@ func (h *OracleHandler) RegisterValidators(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(registerValidatorsResponse{NodeIDs: nodeIDs, Count: len(nodeIDs)})
+	json.NewEncoder(w).Encode(registerValidatorsResponse{NodeIDs: nodeIDs, Count: len(nodeIDs), Mode: mode})
+}
+
+func (h *OracleHandler) registerValidatorsViaL1Hub(ctx context.Context, ids []uint) ([]uint, error) {
+	cfg := h.engine.Cfg
+	oracle := h.engine.Oracle
+	if cfg == nil || oracle == nil {
+		return nil, fmt.Errorf("oracle engine not initialized")
+	}
+
+	l1Client, err := bc.NewChainClient(ctx, cfg.L1RPCURL, cfg.L1ChainID, cfg.NodePK)
+	if err != nil {
+		return nil, fmt.Errorf("init L1 validator client: %w", err)
+	}
+	if cfg.L1GasPriceWei > 0 {
+		l1Client.GasPriceOverride = big.NewInt(cfg.L1GasPriceWei)
+	}
+
+	hub, err := bc.NewL1Hub(common.HexToAddress(cfg.L1HubContractAddress), l1Client.Eth)
+	if err != nil {
+		return nil, fmt.Errorf("bind L1Hub: %w", err)
+	}
+
+	registered := make([]uint, 0, len(ids))
+	importIDs := make([]*big.Int, 0, len(ids))
+	for _, id := range ids {
+		node := oracle.Nodes[id]
+		if node == nil || node.Account == nil || node.Account.PublicKey == nil {
+			continue
+		}
+
+		auth, err := newL1HubTransactor(ctx, l1Client, new(big.Int).Set(node.Account.Balance))
+		if err != nil {
+			return nil, fmt.Errorf("node %d L1 auth: %w", id, err)
+		}
+		pubKey := bc.L1HubPublicKey{
+			X: node.Account.PublicKey.A.X.BigInt(new(big.Int)),
+			Y: node.Account.PublicKey.A.Y.BigInt(new(big.Int)),
+		}
+		tx, err := hub.RegisterValidatorL1(auth, big.NewInt(int64(id)), pubKey)
+		if err != nil {
+			return nil, fmt.Errorf("register validator %d on L1: %w", id, err)
+		}
+		receipt, err := bc.WaitMinedAndLogTxReceipt(ctx, l1Client.Eth, fmt.Sprintf("L1 validator stake registration node=%d", id), tx)
+		if err != nil {
+			return nil, fmt.Errorf("wait L1 register validator %d: %w", id, err)
+		}
+		if receipt.Status != 1 {
+			return nil, fmt.Errorf("L1 register validator %d reverted (tx=%s)", id, tx.Hash().Hex())
+		}
+
+		registered = append(registered, id)
+		importIDs = append(importIDs, big.NewInt(int64(id)))
+	}
+
+	if len(importIDs) == 0 {
+		return registered, nil
+	}
+
+	auth, err := newL1HubTransactor(ctx, l1Client, l1ToL2FeeValue(cfg.L1L2ValueWei))
+	if err != nil {
+		return nil, fmt.Errorf("L1 import auth: %w", err)
+	}
+	tx, err := hub.BatchImportValidatorsToL2(
+		auth,
+		importIDs,
+		big.NewInt(30_000_000),
+		big.NewInt(800),
+		l1Client.From,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("request validator import to L2: %w", err)
+	}
+	receipt, err := bc.WaitMinedAndLogTxReceipt(ctx, l1Client.Eth, "L1->L2 validator import request", tx)
+	if err != nil {
+		return nil, fmt.Errorf("wait L1 validator import request: %w", err)
+	}
+	if receipt.Status != 1 {
+		return nil, fmt.Errorf("L1 validator import request reverted (tx=%s)", tx.Hash().Hex())
+	}
+
+	return registered, nil
+}
+
+func newL1HubTransactor(ctx context.Context, chain *bc.ChainClient, valueWei *big.Int) (*bind.TransactOpts, error) {
+	nonce, err := chain.Eth.PendingNonceAt(ctx, chain.From)
+	if err != nil {
+		return nil, fmt.Errorf("get nonce: %w", err)
+	}
+	gasPrice := chain.GasPriceOverride
+	if gasPrice == nil || gasPrice.Sign() == 0 {
+		gasPrice, err = chain.Eth.SuggestGasPrice(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("suggest gas price: %w", err)
+		}
+	}
+	auth, err := bind.NewKeyedTransactorWithChainID(chain.PrivKey, chain.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("new transactor: %w", err)
+	}
+	if valueWei == nil {
+		valueWei = big.NewInt(0)
+	}
+	auth.From = chain.From
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = valueWei
+	auth.GasPrice = gasPrice
+	return auth, nil
+}
+
+func l1ToL2FeeValue(raw string) *big.Int {
+	if strings.TrimSpace(raw) == "" {
+		// Local zkSync direct mailbox requests are payable. This default affects
+		// transferred value only; CSV gas remains the receipt gasUsed.
+		return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	}
+	v, ok := new(big.Int).SetString(strings.TrimSpace(raw), 10)
+	if !ok || v.Sign() < 0 {
+		return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+	}
+	return v
 }
 
 // BurnDefaultUser handles POST /users/default/burn by calling BurnTx for the
@@ -261,8 +401,14 @@ func (h *OracleHandler) ReplaceValidatorAccount(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := node.ReplaceAccountTx(replaceWithID); err != nil {
-		log.Printf("replace account node=%d failed: %v", nodeID, err)
+	var replaceErr error
+	if h.engine.Cfg != nil && h.engine.Cfg.L1RPCURL != "" && h.engine.Cfg.L1HubContractAddress != "" {
+		replaceErr = node.RequestReplacementFromL1Tx(replaceWithID)
+	} else {
+		replaceErr = node.ReplaceAccountTx(replaceWithID)
+	}
+	if replaceErr != nil {
+		log.Printf("replace account node=%d failed: %v", nodeID, replaceErr)
 		http.Error(w, "failed to replace account", http.StatusInternalServerError)
 		return
 	}

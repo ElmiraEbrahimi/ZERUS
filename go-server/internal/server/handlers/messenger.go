@@ -310,6 +310,7 @@ func (h *MessengerHandler) autoRelayL2ToL1(txHash common.Hash, message string) {
 			time.Sleep(l2ToL1RelayPollInterval)
 			continue
 		}
+		l2LogIndex := proof.ID
 		if proof.ID != uint64(logIndex) {
 			log.Printf("messaging: L2->L1 relay log index mismatch proof_id=%d log_index=%d", proof.ID, logIndex)
 		}
@@ -355,7 +356,7 @@ func (h *MessengerHandler) autoRelayL2ToL1(txHash common.Hash, message string) {
 			return
 		}
 
-		tx, err := h.l1.ReceiveFromL2(ctx, message, proofBlockNumber, uint64(logIndex), uint16(attemptTxNumber), proofBytes)
+		tx, err := h.l1.ReceiveFromL2(ctx, message, proofBlockNumber, l2LogIndex, uint16(attemptTxNumber), proofBytes)
 		if err == nil {
 			log.Printf("messaging: L2->L1 relay receive tx submitted (attempt=%d) hash=%s", attempt, tx.Hash().Hex())
 			go waitForTxReceipt("L2->L1 receive", h.l1.Eth, tx)
@@ -395,6 +396,31 @@ func waitForL2ToL1Log(ctx context.Context, rpcClient *rpc.Client, txHash common.
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("timed out waiting for L2->L1 log")
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForL2ToL1LogValue(ctx context.Context, rpcClient *rpc.Client, txHash common.Hash, expectedValue string) (*l2ToL1LogCandidate, error) {
+	ticker := time.NewTicker(l2ToL1RelayPollInterval)
+	defer ticker.Stop()
+
+	expectedValue = strings.ToLower(strings.TrimSpace(expectedValue))
+	for {
+		receipt, err := fetchReceipt(ctx, rpcClient, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if receipt != nil {
+			candidate, ok := extractL2ToL1LogValue(receipt, expectedValue)
+			if ok && candidate != nil {
+				return candidate, nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timed out waiting for L2->L1 log value %s", expectedValue)
 		case <-ticker.C:
 		}
 	}
@@ -589,6 +615,93 @@ func extractL2ToL1Log(receipt map[string]any) (*l2ToL1LogCandidate, bool) {
 			paddedTo,
 		)
 		return fallback, true
+	}
+
+	return nil, false
+}
+
+func extractL2ToL1LogValue(receipt map[string]any, expectedValue string) (*l2ToL1LogCandidate, bool) {
+	if receipt == nil || expectedValue == "" {
+		return nil, false
+	}
+
+	l1BatchNumberFallback, _ := parseUint64(receipt["l1BatchNumber"])
+	l1BatchTxIndexFallback, _ := parseUint64(receipt["l1BatchTxIndex"])
+	l2BlockNumberFallback, _ := parseUint64(receipt["blockNumber"])
+
+	logsRaw, ok := receipt["l2ToL1Logs"].([]any)
+	if !ok || len(logsRaw) == 0 {
+		return nil, false
+	}
+
+	for idx, raw := range logsRaw {
+		logMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		sender := parseString(logMap["sender"])
+		if sender == "" || !strings.EqualFold(sender, l1MessengerSystemAddress) {
+			continue
+		}
+
+		logValue := strings.ToLower(parseString(logMap["value"]))
+		if !strings.EqualFold(logValue, expectedValue) {
+			continue
+		}
+
+		l1BatchNumber, ok := parseUint64(logMap["l1BatchNumber"])
+		if !ok {
+			l1BatchNumber = l1BatchNumberFallback
+		}
+		if l1BatchNumber == 0 {
+			continue
+		}
+
+		l2BlockNumber, ok := parseUint64(logMap["blockNumber"])
+		if !ok {
+			l2BlockNumber = l2BlockNumberFallback
+		}
+
+		l2TxNumberInBatch, ok := parseUint64(logMap["txIndexInL1Batch"])
+		if !ok {
+			l2TxNumberInBatch, ok = parseUint64(logMap["txNumberInBatch"])
+		}
+		if !ok {
+			l2TxNumberInBatch = l1BatchTxIndexFallback
+		}
+		if !ok || l2TxNumberInBatch == 0 {
+			l2TxNumberInBatch, ok = parseUint64(logMap["transactionIndex"])
+		}
+		if !ok || l2TxNumberInBatch == 0 {
+			l2TxNumberInBatch, _ = parseUint64(logMap["txNumberInBlock"])
+		}
+
+		logIndex, ok := parseUint64(logMap["transactionLogIndex"])
+		if !ok {
+			logIndex, ok = parseUint64(logMap["logIndex"])
+		}
+		if !ok {
+			logIndex = uint64(idx)
+		}
+
+		candidate := &l2ToL1LogCandidate{
+			LogIndex:        int(logIndex),
+			L2BlockNumber:   l2BlockNumber,
+			L1BatchNumber:   l1BatchNumber,
+			L2TxNumberBatch: l2TxNumberInBatch,
+			Sender:          sender,
+			LogKey:          strings.ToLower(parseString(logMap["key"])),
+			Value:           logValue,
+			Raw:             logMap,
+		}
+		log.Printf(
+			"messaging: L2->L1 relay matched value=%s l1_batch=%d tx_in_batch=%d log_index=%d",
+			logValue,
+			l1BatchNumber,
+			l2TxNumberInBatch,
+			logIndex,
+		)
+		return candidate, true
 	}
 
 	return nil, false

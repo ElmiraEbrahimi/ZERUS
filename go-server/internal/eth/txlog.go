@@ -134,6 +134,31 @@ func LogTxReceipt(label string, tx *types.Transaction, receipt *types.Receipt) {
 	writeTxReceiptCSV(label, receipt)
 }
 
+// LogReceipt logs a receipt when the originating transaction cannot be decoded
+// by go-ethereum, which can happen for zkSync system-created L1->L2 tx types.
+func LogReceipt(label string, receipt *types.Receipt) {
+	if receipt == nil {
+		return
+	}
+
+	effectiveGasPrice := receipt.EffectiveGasPrice
+	if effectiveGasPrice == nil {
+		effectiveGasPrice = big.NewInt(0)
+	}
+
+	gasCostWei := new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveGasPrice)
+	log.Printf(
+		"%s tx: hash=%s gasUsed=%d gasPrice=%s gasCost=%s wei",
+		label,
+		receipt.TxHash.Hex(),
+		receipt.GasUsed,
+		effectiveGasPrice.String(),
+		gasCostWei.String(),
+	)
+
+	writeTxReceiptCSV(label, receipt)
+}
+
 // WaitAndLogTxReceipt waits for the transaction receipt and logs gas cost details.
 func WaitAndLogTxReceipt(ctx context.Context, backend bind.DeployBackend, label string, tx *types.Transaction) {
 	if tx == nil || backend == nil {
