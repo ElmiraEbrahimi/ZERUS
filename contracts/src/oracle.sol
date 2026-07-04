@@ -280,7 +280,6 @@ contract Oracle is MerkleTree {
     function importValidatorsFromL1(
         ValidatorInput[] calldata inputs
     ) external onlyL1Hub {
-        uint256[] memory ids = new uint256[](inputs.length);
         for (uint256 i = 0; i < inputs.length; i++) {
             ValidatorInput calldata input = inputs[i];
             require(
@@ -302,7 +301,6 @@ contract Oracle is MerkleTree {
             leaf[0] = hashAccount(account);
             insert(MiMC.hash(leaf));
 
-            ids[i] = input.validatorID;
             emit ValidatorRegistered(
                 input.validatorAddr,
                 input.validatorID,
@@ -314,10 +312,6 @@ contract Oracle is MerkleTree {
 
         uint256 newRoot = getRoot();
         emit ValidatorsImportedFromL1(inputs.length, newRoot);
-        _sendToL1(
-            L2ToL1MsgType.VALIDATOR_IMPORT_RESULT,
-            abi.encode(ids, newRoot)
-        );
     }
 
     /// @notice Apply an L1-initiated validator replacement (paper SIV-C:

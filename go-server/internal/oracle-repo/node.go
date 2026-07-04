@@ -47,6 +47,8 @@ const (
 	Aggregator
 )
 
+const validatorStateSyncTimeout = 5 * time.Minute
+
 var (
 	proofInvalidSelector          = crypto.Keccak256([]byte("ProofInvalid()"))[:4]
 	publicInputNotInFieldSelector = crypto.Keccak256([]byte("PublicInputNotInField()"))[:4]
@@ -325,14 +327,21 @@ func (n *Node) Start() {
 						}
 						n.IPFSContent.IncMerkleTree = *n.IncMerkleTree
 						fmt.Printf("updating ipfs content... (node_id=%v)\n", n.ID)
-						latestIPFSHash, _ := n.UpdateIPFS()
+						latestIPFSHash, err := n.UpdateIPFS()
+						if err != nil {
+							log.Printf("failed to update IPFS content (node=%d): %v", n.ID, err)
+							break
+						}
 						// Anchor the finalized commitment root with the DFS
 						// reference on-chain (paper SIV-E Steps 6-7).
 						root := new(big.Int)
 						if r := n.IncMerkleTree.LatestRoot(); r != nil {
 							root.SetBytes(r)
 						}
-						n.publishCommitmentRootTx(root, latestIPFSHash)
+						if err := n.publishCommitmentRootTx(root, latestIPFSHash, "L2 publish IPFS burn root"); err != nil {
+							log.Printf("failed to publish IPFS burn root (node=%d): %v", n.ID, err)
+							break
+						}
 						for _, key := range keys {
 							delete(n.IncVotes, key)
 						}
@@ -828,9 +837,18 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	}
 	nValidators := n.cfg.NodeCount
 	threshold := bftThreshold(nValidators)
+	quorumSize := bftQuorumSize(nValidators)
 
 	if majorityCount < threshold {
 		return nil, fmt.Errorf("no BFT quorum for vote mask: max=%d threshold=%d", majorityCount, threshold)
+	}
+	if len(voteSlice) < quorumSize {
+		return nil, fmt.Errorf("not enough votes for BFT quorum witness: have=%d need=%d", len(voteSlice), quorumSize)
+	}
+
+	voteSlice, signedVotes, voteMasks, err = selectQuorumBatchVotes(voteSlice, signedVotes, voteMasks, majorityVote, threshold, quorumSize)
+	if err != nil {
+		return nil, err
 	}
 
 	fmt.Printf("Length of WithdrawalReqIDs: %d\n", len(batchIDs))
@@ -898,7 +916,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 		return nil, fmt.Errorf("write account: %w", err)
 	}
 
-	validatorConstraints := make([]votingbatch.BatchingValidatorConstraints, n.cfg.NodeCount)
+	validatorConstraints := make([]votingbatch.BatchingValidatorConstraints, quorumSize)
 
 	validatorBits := new(big.Int)
 	honestBits := new(big.Int) //tracks validators matching majority
@@ -1379,7 +1397,10 @@ func decodeRevertData(data []byte) string {
 // publishCommitmentRootTx reports the finalized commitment-tree root and the
 // DFS object identifier to the Gateway (paper SIV-E Steps 6-7). Only the
 // current round aggregator's transaction is accepted on-chain.
-func (n *Node) publishCommitmentRootTx(root *big.Int, dfsRef string) error {
+func (n *Node) publishCommitmentRootTx(root *big.Int, dfsRef string, label string) error {
+	if label == "" {
+		label = "L2 publish IPFS root"
+	}
 	fmt.Printf("publishing commitment root (validator=%v root=%s) ...\n", n.ID, root)
 	oracleContractAddr := common.HexToAddress(n.cfg.OracleContractAddress)
 	bcClient, err := bc.NewOracle(oracleContractAddr, n.ethClient)
@@ -1405,11 +1426,18 @@ func (n *Node) publishCommitmentRootTx(root *big.Int, dfsRef string) error {
 	if err != nil {
 		log.Fatalf("failed to wait for transaction mining: %v", err)
 	}
-	bc.LogTxReceipt("L2 publish DFS commitment root", tx, receipt)
+	bc.LogTxReceipt(label, tx, receipt)
 	if receipt.Status == 1 {
 		fmt.Printf("successfully published commitment root (node=%v)\n", n.ID)
 	} else {
-		fmt.Printf("Transaction failed (node=%v\n)", n.ID)
+		revertReason, callErr := n.revertReason(context.Background(), tx, receipt.BlockNumber)
+		if revertReason != "" {
+			return fmt.Errorf("%s reverted (node=%v tx=%s revert=%s)", label, n.ID, tx.Hash().Hex(), revertReason)
+		}
+		if callErr != "" {
+			return fmt.Errorf("%s failed (node=%v tx=%s call_err=%s)", label, n.ID, tx.Hash().Hex(), callErr)
+		}
+		return fmt.Errorf("%s failed (node=%v tx=%s)", label, n.ID, tx.Hash().Hex())
 	}
 
 	return nil
@@ -1506,10 +1534,15 @@ func (n *Node) awaitStateSync(timeout time.Duration) error {
 	}
 }
 
+// AwaitStateSync exposes the validator-tree sync barrier to HTTP/setup code.
+func (n *Node) AwaitStateSync(timeout time.Duration) error {
+	return n.awaitStateSync(timeout)
+}
+
 func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	fmt.Printf("starting to replace account (node=%v)...\n", n.ID)
 
-	if err := n.awaitStateSync(30 * time.Second); err != nil {
+	if err := n.awaitStateSync(validatorStateSyncTimeout); err != nil {
 		return fmt.Errorf("replace: %w", err)
 	}
 
@@ -1600,7 +1633,7 @@ func (n *Node) RequestReplacementFromL1Tx(replaceWithAccountID uint64) error {
 	if n.cfg == nil || n.cfg.L1RPCURL == "" || n.cfg.L1HubContractAddress == "" {
 		return n.ReplaceAccountTx(replaceWithAccountID)
 	}
-	if err := n.awaitStateSync(30 * time.Second); err != nil {
+	if err := n.awaitStateSync(validatorStateSyncTimeout); err != nil {
 		return fmt.Errorf("l1 replacement: %w", err)
 	}
 
@@ -1731,7 +1764,7 @@ func l1ToL2RequestValue(raw string) *big.Int {
 func (n *Node) ExitTx() error {
 	fmt.Printf("exiting account (node=%v)...\n", n.ID)
 
-	if err := n.awaitStateSync(30 * time.Second); err != nil {
+	if err := n.awaitStateSync(validatorStateSyncTimeout); err != nil {
 		return fmt.Errorf("exit: %w", err)
 	}
 
@@ -1796,7 +1829,7 @@ func (n *Node) ExitTx() error {
 func (n *Node) WithdrawAccountTx() error {
 	fmt.Printf("starting withdraw account (node=%v)...\n", n.ID)
 
-	if err := n.awaitStateSync(30 * time.Second); err != nil {
+	if err := n.awaitStateSync(validatorStateSyncTimeout); err != nil {
 		return fmt.Errorf("withdraw: %w", err)
 	}
 
@@ -1922,6 +1955,69 @@ func bftThreshold(nValidators int) int {
 	}
 	f := (nValidators - 1) / 3
 	return f + 1
+}
+
+// bftQuorumSize returns the number of validator responses represented in the
+// voting proof. The full committee has n=3f+1 validators, but the aggregator
+// only needs a quorum of 2f+1 responses to finalize.
+func bftQuorumSize(nValidators int) int {
+	if nValidators <= 0 {
+		return 0
+	}
+	f := (nValidators - 1) / 3
+	return 2*f + 1
+}
+
+func selectQuorumBatchVotes(votes []*BatchedWiVote, signed []*SignedBatchVote, masks []*big.Int, majorityVote *big.Int, agreementThreshold int, quorumSize int) ([]*BatchedWiVote, []*SignedBatchVote, []*big.Int, error) {
+	if len(votes) != len(signed) || len(votes) != len(masks) {
+		return nil, nil, nil, fmt.Errorf("vote slice length mismatch")
+	}
+	if quorumSize <= 0 || agreementThreshold <= 0 {
+		return nil, nil, nil, fmt.Errorf("invalid quorum parameters: quorum=%d agreement=%d", quorumSize, agreementThreshold)
+	}
+	if len(votes) < quorumSize {
+		return nil, nil, nil, fmt.Errorf("not enough votes for quorum: have=%d need=%d", len(votes), quorumSize)
+	}
+
+	selected := make([]bool, len(votes))
+	selectedVotes := make([]*BatchedWiVote, 0, quorumSize)
+	selectedSigned := make([]*SignedBatchVote, 0, quorumSize)
+	selectedMasks := make([]*big.Int, 0, quorumSize)
+	agreementCount := 0
+
+	add := func(i int) {
+		selected[i] = true
+		selectedVotes = append(selectedVotes, votes[i])
+		selectedSigned = append(selectedSigned, signed[i])
+		selectedMasks = append(selectedMasks, masks[i])
+	}
+
+	for i, mask := range masks {
+		if agreementCount >= agreementThreshold {
+			break
+		}
+		if mask != nil && mask.Cmp(majorityVote) == 0 {
+			add(i)
+			agreementCount++
+		}
+	}
+	if agreementCount < agreementThreshold {
+		return nil, nil, nil, fmt.Errorf("not enough agreeing votes for quorum witness: have=%d need=%d", agreementCount, agreementThreshold)
+	}
+
+	for i := range votes {
+		if len(selectedVotes) >= quorumSize {
+			break
+		}
+		if !selected[i] {
+			add(i)
+		}
+	}
+	if len(selectedVotes) != quorumSize {
+		return nil, nil, nil, fmt.Errorf("failed to build quorum witness: have=%d need=%d", len(selectedVotes), quorumSize)
+	}
+
+	return selectedVotes, selectedSigned, selectedMasks, nil
 }
 
 // validateRoundWindow enforces the deterministic batching rule (paper

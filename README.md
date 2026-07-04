@@ -211,8 +211,8 @@ particular, validator lifecycle measurements are logged as distinct rows for
 L1 staking/requests, L2 execution, and L1 finalization:
 
 - `L1 validator stake registration node=<id>`: stake registration on the L1 Hub.
-- `L1->L2 validator import request`: L1 request that imports validators to L2.
-- `L2 validator import execution from L1`: L2 execution of the import.
+- `L1->L2 validator import request chunk=<i>/<k> count=<m>`: L1 request that imports a bounded chunk of validators to L2. Large committees are split into chunks instead of one oversized L1->L2 message.
+- `L2 validator import execution from L1 count=<m>`: L2 execution of one validator-import chunk; this is the step that inserts those validators into the L2 validator tree.
 - `L2->L1 validator import result finalization on L1`: L1 finalization of the import result.
 - `L2 submitWiVote batch finalization`: L2 batch-finalization transaction.
 - `L2->L1 checkpoint finalization on L1`: L1 finalization of the submitted checkpoint.

@@ -224,11 +224,11 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		rewardedBalance := api.Add(validator.Balance, RewardValidator)
 
 		// dishonest gets max(balance - PenaltyValidator, 0)
-		cmpBal := api.Cmp(validator.Balance, PenaltyValidator)     // -1 if bal<penalty, 0 if ==, 1 if >
-		isLess := api.IsZero(api.Add(cmpBal, 1))                   // 1 if cmpBal == -1 else 0
-		canPay := api.Sub(1, isLess)                               // 1 if bal>=penalty else 0
+		cmpBal := api.Cmp(validator.Balance, PenaltyValidator) // -1 if bal<penalty, 0 if ==, 1 if >
+		isLess := api.IsZero(api.Add(cmpBal, 1))               // 1 if cmpBal == -1 else 0
+		canPay := api.Sub(1, isLess)                           // 1 if bal>=penalty else 0
 
-		penalized := api.Sub(validator.Balance, PenaltyValidator)  // field subtraction OK; clamped by Select
+		penalized := api.Sub(validator.Balance, PenaltyValidator) // field subtraction OK; clamped by Select
 		penalizedOrZero := api.Select(canPay, penalized, 0)
 
 		// newBalance = isHonest ? (bal+reward) : max(bal-penalty, 0)
@@ -260,11 +260,11 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 		// set honest bit if isHonest==1
 		honestBits = api.Add(honestBits, api.Mul(isHonest, bitMask))
 	}
-	// Finalization threshold (paper SIV-A/SIV-D, Alg. 2 line 19): f + 1
-	// with f = floor((n-1)/3), guaranteeing at least one honest supporting
-	// validator under the BFT assumption n = 3f + 1.
-	n := len(c.Validators)
-	f := (n - 1) / 3
+	// The witness contains the selected quorum, not the full committee. Under
+	// n=3f+1, the quorum size is 2f+1, so f=(quorum-1)/2 and at least f+1
+	// validators in this quorum must agree with MajorityVote.
+	quorumSize := len(c.Validators)
+	f := (quorumSize - 1) / 2
 	threshold := frontend.Variable(f + 1)
 
 	// require majorityCount >= threshold

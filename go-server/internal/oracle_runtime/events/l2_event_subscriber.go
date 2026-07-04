@@ -406,9 +406,11 @@ func (l *L2ContractEventSubscriber) handleTypedEvent(name string, evlog types.Lo
 		// Relay the WITHDRAW_REQUEST message to L1 (F-02/F-16).
 		l.relayL2ToL1(evlog)
 	case "ValidatorsImportedFromL1":
-		l.logL1ToL2ExecutionReceipt("L2 validator import execution from L1", evlog)
-		// Relay the VALIDATOR_IMPORT_RESULT message to L1 (F-01).
-		l.relayL2ToL1(evlog)
+		label := "L2 validator import execution from L1"
+		if imported, err := l.filterer.ParseValidatorsImportedFromL1(evlog); err == nil && imported.Count != nil {
+			label = fmt.Sprintf("L2 validator import execution from L1 count=%s", imported.Count.String())
+		}
+		l.logL1ToL2ExecutionReceipt(label, evlog)
 	case "ReplacementFromL1Processed":
 		l.logL1ToL2ExecutionReceipt("L2 validator replacement execution from L1", evlog)
 		// Relay the REPLACEMENT_RESULT message to L1 (F-01).

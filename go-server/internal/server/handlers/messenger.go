@@ -547,13 +547,17 @@ func extractL2ToL1Log(receipt map[string]any) (*l2ToL1LogCandidate, bool) {
 			l2TxNumberInBatch, _ = parseUint64(logMap["txNumberInBlock"])
 		}
 
-		logIndex, ok := parseUint64(logMap["transactionLogIndex"])
+		receiptLogIndex, ok := parseUint64(logMap["transactionLogIndex"])
 		if !ok {
-			logIndex, ok = parseUint64(logMap["logIndex"])
+			receiptLogIndex, ok = parseUint64(logMap["logIndex"])
 		}
 		if !ok {
-			logIndex = uint64(idx)
+			receiptLogIndex = uint64(idx)
 		}
+		// zks_getL2ToL1LogProof expects the index inside receipt.l2ToL1Logs,
+		// not the EVM receipt logIndex. Using the receipt logIndex can prove a
+		// different system log and makes L1Hub.finalizeFromL2 revert.
+		l2ToL1LogIndex := uint64(idx)
 
 		txIndexInL1BatchRaw := formatRaw(logMap["txIndexInL1Batch"])
 		txNumberInBatchRaw := formatRaw(logMap["txNumberInBatch"])
@@ -566,7 +570,7 @@ func extractL2ToL1Log(receipt map[string]any) (*l2ToL1LogCandidate, bool) {
 		isServiceRaw := formatRaw(logMap["isService"])
 
 		candidate := &l2ToL1LogCandidate{
-			LogIndex:        int(logIndex),
+			LogIndex:        int(l2ToL1LogIndex),
 			L2BlockNumber:   l2BlockNumber,
 			L1BatchNumber:   l1BatchNumber,
 			L2TxNumberBatch: l2TxNumberInBatch,
@@ -578,13 +582,14 @@ func extractL2ToL1Log(receipt map[string]any) (*l2ToL1LogCandidate, bool) {
 
 		if keyMatches {
 			log.Printf(
-				"messaging: L2->L1 relay log sender=%s key=%s value=%s l1_batch=%d tx_in_batch=%d log_index=%d (l2ShardId=%s isService=%s txIndexInL1Batch=%s txNumberInBatch=%s transactionIndex=%s txNumberInBlock=%s from=%s to=%s)",
+				"messaging: L2->L1 relay log sender=%s key=%s value=%s l1_batch=%d tx_in_batch=%d l2_to_l1_log_index=%d receipt_log_index=%d (l2ShardId=%s isService=%s txIndexInL1Batch=%s txNumberInBatch=%s transactionIndex=%s txNumberInBlock=%s from=%s to=%s)",
 				sender,
 				logKey,
 				logValue,
 				l1BatchNumber,
 				l2TxNumberInBatch,
-				logIndex,
+				l2ToL1LogIndex,
+				receiptLogIndex,
 				l2ShardRaw,
 				isServiceRaw,
 				txIndexInL1BatchRaw,
@@ -676,16 +681,20 @@ func extractL2ToL1LogValue(receipt map[string]any, expectedValue string) (*l2ToL
 			l2TxNumberInBatch, _ = parseUint64(logMap["txNumberInBlock"])
 		}
 
-		logIndex, ok := parseUint64(logMap["transactionLogIndex"])
+		receiptLogIndex, ok := parseUint64(logMap["transactionLogIndex"])
 		if !ok {
-			logIndex, ok = parseUint64(logMap["logIndex"])
+			receiptLogIndex, ok = parseUint64(logMap["logIndex"])
 		}
 		if !ok {
-			logIndex = uint64(idx)
+			receiptLogIndex = uint64(idx)
 		}
+		// zks_getL2ToL1LogProof expects the index inside receipt.l2ToL1Logs.
+		// The EVM receipt log index may point to another system log and makes
+		// L1Hub.finalizeFromL2 fail proof verification.
+		l2ToL1LogIndex := uint64(idx)
 
 		candidate := &l2ToL1LogCandidate{
-			LogIndex:        int(logIndex),
+			LogIndex:        int(l2ToL1LogIndex),
 			L2BlockNumber:   l2BlockNumber,
 			L1BatchNumber:   l1BatchNumber,
 			L2TxNumberBatch: l2TxNumberInBatch,
@@ -695,11 +704,12 @@ func extractL2ToL1LogValue(receipt map[string]any, expectedValue string) (*l2ToL
 			Raw:             logMap,
 		}
 		log.Printf(
-			"messaging: L2->L1 relay matched value=%s l1_batch=%d tx_in_batch=%d log_index=%d",
+			"messaging: L2->L1 relay matched value=%s l1_batch=%d tx_in_batch=%d l2_to_l1_log_index=%d receipt_log_index=%d",
 			logValue,
 			l1BatchNumber,
 			l2TxNumberInBatch,
-			logIndex,
+			l2ToL1LogIndex,
+			receiptLogIndex,
 		)
 		return candidate, true
 	}

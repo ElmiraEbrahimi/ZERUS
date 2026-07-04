@@ -46,8 +46,9 @@ func setupMerkleCircuit(cfg *config.Config, keyDir string) (*merkleproof.MerkleP
 func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.BatchingVotingCircuit, constraint.ConstraintSystem, groth16.ProvingKey, groth16.VerifyingKey) {
 	log.Println("setting up voting circuit...")
 	var circuit votingbatch.BatchingVotingCircuit
-	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, cfg.NodeCount)
-	for i := 0; i < cfg.NodeCount; i++ {
+	quorumSize := votingQuorumWitnessSize(cfg.NodeCount)
+	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, quorumSize)
+	for i := 0; i < quorumSize; i++ {
 		circuit.Validators[i] = votingbatch.BatchingValidatorConstraints{}
 		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, cfg.SparseTreeDepth+1)
 	}
@@ -71,6 +72,14 @@ func setupVotingCircuit(cfg *config.Config, keyDir string) (*votingbatch.Batchin
 	log.Println("completed set up voting circuit")
 
 	return &circuit, _r1cs, pk, vk
+}
+
+func votingQuorumWitnessSize(nValidators int) int {
+	if nValidators <= 0 {
+		return 0
+	}
+	f := (nValidators - 1) / 3
+	return 2*f + 1
 }
 
 func fileExists(path string) bool {

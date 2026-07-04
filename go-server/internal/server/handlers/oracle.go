@@ -26,6 +26,11 @@ type OracleHandler struct {
 	engine *oracle_runtime.OracleEngine
 }
 
+const (
+	validatorImportChunkSize = 4
+	validatorImportSyncWait  = 5 * time.Minute
+)
+
 // NewOracleHandler constructs a new OracleHandler with the given dependency.
 func NewOracleHandler(engine *oracle_runtime.OracleEngine) *OracleHandler {
 	return &OracleHandler{engine: engine}
@@ -215,29 +220,92 @@ func (h *OracleHandler) registerValidatorsViaL1Hub(ctx context.Context, ids []ui
 		return registered, nil
 	}
 
-	auth, err := newL1HubTransactor(ctx, l1Client, l1ToL2FeeValue(cfg.L1L2ValueWei))
-	if err != nil {
-		return nil, fmt.Errorf("L1 import auth: %w", err)
+	totalChunks := (len(importIDs) + validatorImportChunkSize - 1) / validatorImportChunkSize
+	for start, chunk := 0, 1; start < len(importIDs); start, chunk = start+validatorImportChunkSize, chunk+1 {
+		end := start + validatorImportChunkSize
+		if end > len(importIDs) {
+			end = len(importIDs)
+		}
+		chunkIDs := importIDs[start:end]
+
+		auth, err := newL1HubTransactor(ctx, l1Client, l1ToL2FeeValue(cfg.L1L2ValueWei))
+		if err != nil {
+			return nil, fmt.Errorf("L1 import auth chunk %d: %w", chunk, err)
+		}
+		tx, err := hub.BatchImportValidatorsToL2(
+			auth,
+			chunkIDs,
+			big.NewInt(30_000_000),
+			big.NewInt(800),
+			l1Client.From,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("request validator import to L2 chunk %d: %w", chunk, err)
+		}
+		label := fmt.Sprintf("L1->L2 validator import request chunk=%d/%d count=%d", chunk, totalChunks, len(chunkIDs))
+		receipt, err := bc.WaitMinedAndLogTxReceipt(ctx, l1Client.Eth, label, tx)
+		if err != nil {
+			return nil, fmt.Errorf("wait L1 validator import request chunk %d: %w", chunk, err)
+		}
+		if receipt.Status != 1 {
+			return nil, fmt.Errorf("L1 validator import request chunk %d reverted (tx=%s)", chunk, tx.Hash().Hex())
+		}
 	}
-	tx, err := hub.BatchImportValidatorsToL2(
-		auth,
-		importIDs,
-		big.NewInt(30_000_000),
-		big.NewInt(800),
-		l1Client.From,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("request validator import to L2: %w", err)
-	}
-	receipt, err := bc.WaitMinedAndLogTxReceipt(ctx, l1Client.Eth, "L1->L2 validator import request", tx)
-	if err != nil {
-		return nil, fmt.Errorf("wait L1 validator import request: %w", err)
-	}
-	if receipt.Status != 1 {
-		return nil, fmt.Errorf("L1 validator import request reverted (tx=%s)", tx.Hash().Hex())
+
+	if err := h.waitForL2ValidatorImport(ctx, len(importIDs), registered); err != nil {
+		return nil, err
 	}
 
 	return registered, nil
+}
+
+func (h *OracleHandler) waitForL2ValidatorImport(ctx context.Context, expectedCount int, registered []uint) error {
+	if expectedCount == 0 {
+		return nil
+	}
+	cfg := h.engine.Cfg
+	oracleRuntime := h.engine.Oracle
+	if cfg == nil || oracleRuntime == nil {
+		return fmt.Errorf("oracle engine not initialized")
+	}
+	oracleContractAddr := common.HexToAddress(cfg.OracleContractAddress)
+	oracleContract, err := bc.NewOracle(oracleContractAddr, h.engine.EthClient)
+	if err != nil {
+		return fmt.Errorf("bind L2 Oracle for validator import sync: %w", err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, validatorImportSyncWait)
+	defer cancel()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		nextLeafIndex, err := oracleContract.GetNextLeafIndex(&bind.CallOpts{Context: waitCtx})
+		if err == nil && nextLeafIndex != nil && nextLeafIndex.Cmp(big.NewInt(int64(expectedCount))) >= 0 {
+			break
+		}
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+			log.Printf("waiting for L2 validator import: getNextLeafIndex failed: %v", err)
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("L2 validator import did not reach %d validators within %s", expectedCount, validatorImportSyncWait)
+		case <-ticker.C:
+		}
+	}
+
+	for _, id := range registered {
+		node := oracleRuntime.Nodes[id]
+		if node == nil {
+			continue
+		}
+		if err := node.AwaitStateSync(validatorImportSyncWait); err != nil {
+			return fmt.Errorf("wait L2 validator import local sync: %w", err)
+		}
+		return nil
+	}
+	return nil
 }
 
 func newL1HubTransactor(ctx context.Context, chain *bc.ChainClient, valueWei *big.Int) (*bind.TransactOpts, error) {

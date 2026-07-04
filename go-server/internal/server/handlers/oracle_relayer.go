@@ -125,77 +125,103 @@ func (r *OracleL2ToL1Relayer) RelayTx(txHash common.Hash) {
 			}
 		}
 
-		proof, err := fetchL2ToL1LogProof(ctx, r.l2.Eth.Client(), txHash, uint64(logCandidate.LogIndex), interopMode)
-		if err != nil || proof == nil || len(proof.Proof) == 0 {
-			time.Sleep(l2ToL1RelayPollInterval)
-			continue
-		}
-		l2LogIndex := proof.ID
-
-		txNumber := logCandidate.L2TxNumberBatch
-		if proof.Log != nil {
-			if proofTxNum, ok := parseUint64(proof.Log["txNumberInBlock"]); ok {
-				txNumber = proofTxNum
-			}
-		}
-		if txNumber > math.MaxUint16 {
-			log.Printf("oracle relayer: invalid tx index=%d", txNumber)
-			return
-		}
-
-		proofBytes, err := parseProof(proof.Proof)
-		if err != nil {
-			log.Printf("oracle relayer: invalid proof tx=%s: %v", txHash.Hex(), err)
-			return
-		}
-
-		auth, err := r.l1Transactor(ctx)
-		if err != nil {
-			log.Printf("oracle relayer: build L1 transactor failed: %v", err)
-			return
-		}
-
-		tx, err := r.hub.FinalizeFromL2(
-			auth,
-			message,
-			new(big.Int).SetUint64(proofBlockNumber),
-			new(big.Int).SetUint64(l2LogIndex),
-			uint16(txNumber),
-			proofBytes,
-		)
-		if err == nil {
-			log.Printf("oracle relayer: finalizeFromL2 submitted l2_tx=%s l1_tx=%s (attempt=%d)", txHash.Hex(), tx.Hash().Hex(), attempt)
-			receipt, err := bind.WaitMined(ctx, r.l1.Eth, tx)
-			if err != nil {
-				log.Printf("oracle relayer: wait finalizeFromL2 receipt failed: %v", err)
-				return
-			}
-			eth.LogTxReceipt(l1FinalizeLabel(message), tx, receipt)
-			if receipt.Status == 1 {
-				log.Printf("oracle relayer: message finalized on L1 (l2_tx=%s)", txHash.Hex())
-			} else {
-				log.Printf("oracle relayer: finalizeFromL2 reverted (l2_tx=%s)", txHash.Hex())
-			}
-			return
-		}
-
-		errMsg := strings.ToLower(err.Error())
-		if strings.Contains(errMsg, "already consumed") {
-			log.Printf("oracle relayer: message already consumed (l2_tx=%s)", txHash.Hex())
-			return
-		}
-		if strings.Contains(errMsg, "execution reverted") || strings.Contains(errMsg, "revert") {
-			if shouldRetryL1FinalizeRevert(message, errMsg) {
-				log.Printf("oracle relayer: finalizeFromL2 transient revert (attempt=%d), retrying: %v", attempt, err)
-				time.Sleep(l2ToL1RelayPollInterval)
+		for _, proofRequestIndex := range l2ToL1ProofIndexCandidates(uint64(logCandidate.LogIndex), 8) {
+			proof, err := fetchL2ToL1LogProof(ctx, r.l2.Eth.Client(), txHash, proofRequestIndex, interopMode)
+			if err != nil || proof == nil || len(proof.Proof) == 0 {
 				continue
 			}
-			log.Printf("oracle relayer: finalizeFromL2 reverted, not retrying (l2_tx=%s): %v", txHash.Hex(), err)
-			return
+			l2LogIndex := proof.ID
+
+			txNumber := logCandidate.L2TxNumberBatch
+			if proof.Log != nil {
+				if proofTxNum, ok := parseUint64(proof.Log["txNumberInBlock"]); ok {
+					txNumber = proofTxNum
+				}
+			}
+			if txNumber > math.MaxUint16 {
+				log.Printf("oracle relayer: invalid tx index=%d", txNumber)
+				return
+			}
+
+			proofBytes, err := parseProof(proof.Proof)
+			if err != nil {
+				log.Printf("oracle relayer: invalid proof tx=%s: %v", txHash.Hex(), err)
+				return
+			}
+
+			auth, err := r.l1Transactor(ctx)
+			if err != nil {
+				log.Printf("oracle relayer: build L1 transactor failed: %v", err)
+				return
+			}
+
+			tx, err := r.hub.FinalizeFromL2(
+				auth,
+				message,
+				new(big.Int).SetUint64(proofBlockNumber),
+				new(big.Int).SetUint64(l2LogIndex),
+				uint16(txNumber),
+				proofBytes,
+			)
+			if err == nil {
+				log.Printf("oracle relayer: finalizeFromL2 submitted l2_tx=%s l1_tx=%s proof_request_index=%d proof_id=%d (attempt=%d)", txHash.Hex(), tx.Hash().Hex(), proofRequestIndex, l2LogIndex, attempt)
+				receipt, err := bind.WaitMined(ctx, r.l1.Eth, tx)
+				if err != nil {
+					log.Printf("oracle relayer: wait finalizeFromL2 receipt failed: %v", err)
+					return
+				}
+				eth.LogTxReceipt(l1FinalizeLabel(message), tx, receipt)
+				if receipt.Status == 1 {
+					log.Printf("oracle relayer: message finalized on L1 (l2_tx=%s)", txHash.Hex())
+				} else {
+					log.Printf("oracle relayer: finalizeFromL2 reverted (l2_tx=%s)", txHash.Hex())
+				}
+				return
+			}
+
+			errMsg := strings.ToLower(err.Error())
+			if strings.Contains(errMsg, "already consumed") {
+				log.Printf("oracle relayer: message already consumed (l2_tx=%s)", txHash.Hex())
+				return
+			}
+			if strings.Contains(errMsg, "execution reverted") || strings.Contains(errMsg, "revert") {
+				if isInvalidLogProofRevert(errMsg) {
+					log.Printf("oracle relayer: finalizeFromL2 invalid proof proof_request_index=%d proof_id=%d attempt=%d, trying next proof: %v", proofRequestIndex, l2LogIndex, attempt, err)
+					continue
+				}
+				if shouldRetryL1FinalizeRevert(message, errMsg) {
+					log.Printf("oracle relayer: finalizeFromL2 transient revert (attempt=%d), retrying: %v", attempt, err)
+					time.Sleep(l2ToL1RelayPollInterval)
+					continue
+				}
+				log.Printf("oracle relayer: finalizeFromL2 reverted, not retrying (l2_tx=%s): %v", txHash.Hex(), err)
+				return
+			}
+			log.Printf("oracle relayer: finalizeFromL2 failed proof_request_index=%d proof_id=%d (attempt=%d), trying next proof: %v", proofRequestIndex, l2LogIndex, attempt, err)
 		}
-		log.Printf("oracle relayer: finalizeFromL2 failed (attempt=%d), retrying: %v", attempt, err)
+
+		log.Printf("oracle relayer: no valid L2->L1 proof yet (attempt=%d), retrying", attempt)
 		time.Sleep(l2ToL1RelayPollInterval)
 	}
+}
+
+func l2ToL1ProofIndexCandidates(first uint64, limit uint64) []uint64 {
+	if limit == 0 {
+		limit = 1
+	}
+	out := make([]uint64, 0, limit)
+	out = append(out, first)
+	for i := uint64(0); i < limit; i++ {
+		if i == first {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+func isInvalidLogProofRevert(errMsg string) bool {
+	return strings.Contains(errMsg, "invalid log proof") || strings.Contains(errMsg, "revert: xx")
 }
 
 func shouldRetryL1FinalizeRevert(message []byte, errMsg string) bool {

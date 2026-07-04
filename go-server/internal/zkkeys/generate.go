@@ -11,11 +11,11 @@ import (
 	"l2alchemy/circuits/voting_batch"
 	"l2alchemy/internal/memtime"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
-	"github.com/consensys/gnark-crypto/ecc"
 )
 
 var supportedCircuits = []CircuitName{
@@ -324,11 +324,19 @@ func votingBatchCircuitFromEnv() (*votingbatch.BatchingVotingCircuit, error) {
 	}
 
 	circuit := &votingbatch.BatchingVotingCircuit{}
-	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, nodeCount)
+	circuit.Validators = make([]votingbatch.BatchingValidatorConstraints, votingQuorumWitnessSize(nodeCount))
 	circuit.WithdrawalReqIDs = make([]frontend.Variable, batchSize)
 	circuit.Aggregator.MerkleProof.Path = make([]frontend.Variable, depth+1)
 	for i := range circuit.Validators {
 		circuit.Validators[i].MerkleProof.Path = make([]frontend.Variable, depth+1)
 	}
 	return circuit, nil
+}
+
+func votingQuorumWitnessSize(nValidators int) int {
+	if nValidators <= 0 {
+		return 0
+	}
+	f := (nValidators - 1) / 3
+	return 2*f + 1
 }

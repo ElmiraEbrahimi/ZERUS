@@ -80,7 +80,7 @@ func (n *Node) PersistSpentNullifiers() error {
 	if r := content.IncMerkleTree.LatestRoot(); r != nil {
 		root.SetBytes(r)
 	}
-	return n.publishCommitmentRootTx(root, latestHash)
+	return n.publishCommitmentRootTx(root, latestHash, "L2 publish IPFS spent-nullifiers")
 }
 
 func (n *Node) UpdateIPFS() (string, error) {
