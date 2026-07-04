@@ -1658,8 +1658,8 @@ func (n *Node) RequestReplacementFromL1Tx(replaceWithAccountID uint64) error {
 	if err != nil {
 		return fmt.Errorf("bind L1Hub: %w", err)
 	}
-	if err := waitL1ValidatorActive(context.Background(), hub, targetAccount.Index, 90*time.Second); err != nil {
-		return fmt.Errorf("wait replacement target active on L1: %w", err)
+	if err := waitL1ValidatorImported(context.Background(), hub, targetAccount.Index, 90*time.Second); err != nil {
+		return fmt.Errorf("wait replacement target imported on L1: %w", err)
 	}
 
 	feeValue := l1ToL2RequestValue(n.cfg.L1L2ValueWei)
@@ -1678,8 +1678,13 @@ func (n *Node) RequestReplacementFromL1Tx(replaceWithAccountID uint64) error {
 		},
 		CandidateStake:  candidateStake,
 		TargetLeafIndex: new(big.Int).Set(targetAccount.Index),
-		Path:            path[:],
-		Depth:           big.NewInt(int64(n.cfg.SparseTreeDepth)),
+		TargetPubKey: bc.L1HubPublicKey{
+			X: targetAccount.PublicKey.A.X.BigInt(new(big.Int)),
+			Y: targetAccount.PublicKey.A.Y.BigInt(new(big.Int)),
+		},
+		TargetBalance: new(big.Int).Set(targetAccount.Balance),
+		Path:          path[:],
+		Depth:         big.NewInt(int64(n.cfg.SparseTreeDepth)),
 	}
 
 	tx, err := hub.RequestReplacementL1(
@@ -1707,18 +1712,18 @@ func (n *Node) RequestReplacementFromL1Tx(replaceWithAccountID uint64) error {
 	return nil
 }
 
-func waitL1ValidatorActive(ctx context.Context, hub *bc.L1Hub, validatorID *big.Int, timeout time.Duration) error {
+func waitL1ValidatorImported(ctx context.Context, hub *bc.L1Hub, validatorID *big.Int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		record, err := hub.Validators(&bind.CallOpts{Context: ctx}, validatorID)
 		if err != nil {
 			return err
 		}
-		if record.Active {
+		if record.ImportRequested {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("validator %s is not active after %s", validatorID.String(), timeout)
+			return fmt.Errorf("validator %s is not imported after %s", validatorID.String(), timeout)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

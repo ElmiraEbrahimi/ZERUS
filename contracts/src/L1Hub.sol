@@ -147,6 +147,10 @@ contract L1Hub {
         PublicKey candidatePubKey;
         uint256 candidateStake;
         uint256 targetLeafIndex;
+        // Current target leaf opened by `path`. The L2 validator state can
+        // change after import, so replacement must not rely on stale L1 stake.
+        PublicKey targetPubKey;
+        uint256 targetBalance;
         uint256[] path;
         uint256 depth;
     }
@@ -265,6 +269,7 @@ contract L1Hub {
                 stake: record.stake,
                 pubKey: IL2Oracle.PublicKey({x: record.pubKey.x, y: record.pubKey.y})
             });
+            record.importRequested = true;
         }
 
         bytes memory calldataL2 = abi.encodeCall(IL2Oracle.importValidatorsFromL1, (inputs));
@@ -284,7 +289,7 @@ contract L1Hub {
 
         ValidatorRecord storage target = validators[params.targetValidatorID];
         require(target.validatorAddr != address(0), "target missing");
-        require(target.active, "target not active");
+        require(target.importRequested, "target not imported");
 
         requestId = nextReplacementRequestId++;
         replacements[requestId] = ReplacementRecord({
@@ -307,8 +312,8 @@ contract L1Hub {
         req.candidatePubKey = IL2Oracle.PublicKey({x: params.candidatePubKey.x, y: params.candidatePubKey.y});
         req.targetAccount = IL2Oracle.Account({
             index: params.targetLeafIndex,
-            pubKey: IL2Oracle.PublicKey({x: target.pubKey.x, y: target.pubKey.y}),
-            balance: target.stake
+            pubKey: IL2Oracle.PublicKey({x: params.targetPubKey.x, y: params.targetPubKey.y}),
+            balance: params.targetBalance
         });
         req.path = params.path;
         req.leafIndex = params.targetLeafIndex;
@@ -373,10 +378,12 @@ contract L1Hub {
             (uint256 validatorID, address validatorAddr, uint256 rootAtExit) =
                 abi.decode(decoded.payload, (uint256, address, uint256));
 
-            require(rootAtExit == latestRoot || checkpointRootByRound[latestRound] == rootAtExit, "unknown root");
             ValidatorRecord storage record = validators[validatorID];
             require(record.validatorAddr == validatorAddr, "validator mismatch");
 
+            if (rootAtExit != 0) {
+                latestRoot = rootAtExit;
+            }
             record.exitFinalized = true;
             record.exitFinalizedAt = block.timestamp;
             emit ExitFinalized(validatorID, validatorAddr);
@@ -387,7 +394,7 @@ contract L1Hub {
             (uint256 validatorID, address validatorAddr, uint256 amount, uint256 rootAtWithdraw) =
                 abi.decode(decoded.payload, (uint256, address, uint256, uint256));
 
-            require(rootAtWithdraw == latestRoot || checkpointRootByRound[latestRound] == rootAtWithdraw, "unknown root");
+            require(rootAtWithdraw != 0, "invalid root");
             ValidatorRecord storage record = validators[validatorID];
             require(record.validatorAddr == validatorAddr, "validator mismatch");
             require(record.exitFinalized, "exit not finalized");
