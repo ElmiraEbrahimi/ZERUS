@@ -1539,6 +1539,24 @@ func (n *Node) AwaitStateSync(timeout time.Duration) error {
 	return n.awaitStateSync(timeout)
 }
 
+// AwaitAccountIndex waits until asynchronous L1->L2 lifecycle events have
+// updated the live node handle to the expected validator-tree leaf.
+func (n *Node) AwaitAccountIndex(index uint64, timeout time.Duration) error {
+	if n == nil || n.Account == nil || n.Account.Index == nil {
+		return fmt.Errorf("node account not initialized")
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if n.Account.Index.Uint64() == index {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("node account index not synced within %s (node=%d current=%s expected=%d)", timeout, n.ID, n.Account.Index.String(), index)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func (n *Node) ReplaceAccountTx(replaceWithAccountID uint64) error {
 	fmt.Printf("starting to replace account (node=%v)...\n", n.ID)
 

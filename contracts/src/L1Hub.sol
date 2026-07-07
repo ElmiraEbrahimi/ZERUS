@@ -444,13 +444,20 @@ contract L1Hub {
                 ValidatorRecord storage target = validators[targetValidatorID];
                 address oldValidator = target.validatorAddr;
                 uint256 oldStake = target.stake;
+                bool exitAlreadyFinalized = target.exitFinalized;
+                bool alreadyWithdrawn = target.withdrawn;
+                uint256 exitAlreadyFinalizedAt = target.exitFinalizedAt;
 
                 target.validatorAddr = candidateAddr;
                 target.stake = candidateStake;
                 target.pubKey = req.candidatePubKey;
                 target.active = true;
-                target.exitFinalized = false;
-                target.withdrawn = false;
+                // L2->L1 lifecycle messages can be proven in different order.
+                // If an exit/withdraw for this leaf was already finalized on L1,
+                // replacement finalization must not erase that state.
+                target.exitFinalized = exitAlreadyFinalized;
+                target.withdrawn = alreadyWithdrawn;
+                target.exitFinalizedAt = exitAlreadyFinalizedAt;
 
                 if (oldStake > 0) {
                     (bool sent, ) = payable(oldValidator).call{value: oldStake}("");

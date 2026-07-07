@@ -64,7 +64,7 @@ func (o *Oracle) ApplyReplacedEvent(event *eth.OracleReplaced) error {
 	y.SetBigInt(event.Pubkey.Y)
 	publicKey := eddsa.PublicKey{A: twistededwards.NewPointAffine(x, y)}
 
-	return o.applyToStates(func(state *gnark.State) error {
+	if err := o.applyToStates(func(state *gnark.State) error {
 		account, err := state.ReadAccount(event.Index.Uint64())
 		if err != nil {
 			return fmt.Errorf("read replaced account: %w", err)
@@ -75,7 +75,27 @@ func (o *Oracle) ApplyReplacedEvent(event *eth.OracleReplaced) error {
 			return fmt.Errorf("write replaced account: %w", err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// The L1->L2 replacement path can move a validator to the replaced leaf.
+	// Keep the live node handle aligned with the leaf that now contains its key;
+	// otherwise later exit/withdraw proofs are built for the old index.
+	for id, node := range o.Nodes {
+		if node == nil || node.Account == nil || node.Account.PublicKey == nil {
+			continue
+		}
+		px := node.Account.PublicKey.A.X.BigInt(new(big.Int))
+		py := node.Account.PublicKey.A.Y.BigInt(new(big.Int))
+		if px.Cmp(event.Pubkey.X) == 0 && py.Cmp(event.Pubkey.Y) == 0 {
+			node.Account.Index = new(big.Int).Set(event.Index)
+			node.Account.Balance = new(big.Int).Set(event.Stake)
+			log.Printf("node=%d replacement index synced: index=%s balance=%s", id, event.Index.String(), event.Stake.String())
+		}
+	}
+
+	return nil
 }
 
 func (o *Oracle) ApplyWiVoteSubmittedEvent(event *eth.OracleWiVoteSubmitted) error {

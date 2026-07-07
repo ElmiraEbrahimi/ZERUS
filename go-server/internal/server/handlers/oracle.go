@@ -472,6 +472,9 @@ func (h *OracleHandler) ReplaceValidatorAccount(w http.ResponseWriter, r *http.R
 	var replaceErr error
 	if h.engine.Cfg != nil && h.engine.Cfg.L1RPCURL != "" && h.engine.Cfg.L1HubContractAddress != "" {
 		replaceErr = node.RequestReplacementFromL1Tx(replaceWithID)
+		if replaceErr == nil {
+			replaceErr = node.AwaitAccountIndex(replaceWithID, validatorImportSyncWait)
+		}
 	} else {
 		replaceErr = node.ReplaceAccountTx(replaceWithID)
 	}
