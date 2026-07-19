@@ -51,6 +51,7 @@ contract Oracle is MerkleTree {
     struct ClaimRequest {
         uint256 uniqueID;
         address from;
+        address recipient;
         bytes proof;
         bytes publicWitness;
         bytes32 nullifierHash;
@@ -153,6 +154,7 @@ contract Oracle is MerkleTree {
     // Deterministic batching (paper SIV-D): claims receive sequential
     // identifiers so that round r covers exactly [r*b, (r+1)*b - 1].
     uint256 public immutable batchSize;
+    uint256 public immutable destinationID;
     uint256 private nextClaimID;
 
     mapping(uint256 => address) accounts;
@@ -190,7 +192,9 @@ contract Oracle is MerkleTree {
         uint256 uniqueID,
         bytes proof,
         bytes publicWitness,
-        bytes32 nullifierHash
+        bytes32 nullifierHash,
+        uint256 destinationID,
+        address recipient
     );
 
     event WiVoteSubmitted(
@@ -243,7 +247,8 @@ contract Oracle is MerkleTree {
         uint256 _seedY,
         address votingVerifierAddress,
         uint256 _batchSize,
-        uint256 _aggregatorTimeout
+        uint256 _aggregatorTimeout,
+        uint256 _destinationID
     ) MerkleTree(_levels) {
         require(_batchSize > 0 && _batchSize <= 256, "invalid batch size");
         levels = _levels;
@@ -251,6 +256,7 @@ contract Oracle is MerkleTree {
         seedY = _seedY;
         votingVerifier = VotingVerifier(votingVerifierAddress);
         batchSize = _batchSize;
+        destinationID = _destinationID;
         aggregatorTimeout = _aggregatorTimeout;
         roundStartedAt = block.timestamp;
         owner = msg.sender;
@@ -473,9 +479,13 @@ contract Oracle is MerkleTree {
     function claim(
         bytes memory proof,
         bytes memory publicWitness,
-        bytes32 nullifierHash
+        bytes32 nullifierHash,
+        uint256 claimDestinationID,
+        address recipient
     ) external {
         require(users[msg.sender] == true, "address not registered");
+        require(claimDestinationID == destinationID, "wrong destination");
+        require(recipient != address(0), "recipient required");
         require(!spentNullifiers[nullifierHash], "nullifier already spent");
 
         uint256 uniqueID = nextClaimID;
@@ -484,6 +494,7 @@ contract Oracle is MerkleTree {
         claimRequests[uniqueID] = ClaimRequest(
             uniqueID,
             msg.sender,
+            recipient,
             proof,
             publicWitness,
             nullifierHash,
@@ -491,7 +502,14 @@ contract Oracle is MerkleTree {
             false
         );
 
-        emit ClaimSubmitted(uniqueID, proof, publicWitness, nullifierHash);
+        emit ClaimSubmitted(
+            uniqueID,
+            proof,
+            publicWitness,
+            nullifierHash,
+            claimDestinationID,
+            recipient
+        );
     }
 
     // endregion
@@ -563,8 +581,12 @@ contract Oracle is MerkleTree {
             request.isApproved = true;
             request.isClaimed = true;
             spentNullifiers[request.nullifierHash] = true;
-            tokenClaimBalances[request.from] += BURN_AMOUNT;
-            emit ClaimMinted(baseID + i, request.from, request.nullifierHash);
+            tokenClaimBalances[request.recipient] += BURN_AMOUNT;
+            emit ClaimMinted(
+                baseID + i,
+                request.recipient,
+                request.nullifierHash
+            );
         }
 
         // Round finalized: allow the normal round-robin handover and restart

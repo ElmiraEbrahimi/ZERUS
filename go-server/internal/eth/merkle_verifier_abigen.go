@@ -31,7 +31,7 @@ var (
 
 // MerkleProofVerifierMetaData contains all meta data concerning the MerkleProofVerifier contract.
 var MerkleProofVerifierMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"function\",\"name\":\"compressProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[{\"name\":\"compressed\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyCompressedProof\",\"inputs\":[{\"name\":\"compressedProof\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"},{\"name\":\"input\",\"type\":\"uint256[2]\",\"internalType\":\"uint256[2]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"},{\"name\":\"input\",\"type\":\"uint256[2]\",\"internalType\":\"uint256[2]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"error\",\"name\":\"ProofInvalid\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"PublicInputNotInField\",\"inputs\":[]}]",
+	ABI: "[{\"type\":\"function\",\"name\":\"compressProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[{\"name\":\"compressed\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyCompressedProof\",\"inputs\":[{\"name\":\"compressedProof\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"},{\"name\":\"input\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"},{\"name\":\"input\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"error\",\"name\":\"ProofInvalid\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"PublicInputNotInField\",\"inputs\":[]}]",
 }
 
 // MerkleProofVerifierABI is the input ABI used to generate the binding from.
@@ -211,10 +211,10 @@ func (_MerkleProofVerifier *MerkleProofVerifierCallerSession) CompressProof(proo
 	return _MerkleProofVerifier.Contract.CompressProof(&_MerkleProofVerifier.CallOpts, proof)
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf11817b2.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf2457c8d.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyCompressedProof(opts *bind.CallOpts, compressedProof [4]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyCompressedProof(opts *bind.CallOpts, compressedProof [4]*big.Int, input [4]*big.Int) error {
 	var out []interface{}
 	err := _MerkleProofVerifier.contract.Call(opts, &out, "verifyCompressedProof", compressedProof, input)
 
@@ -226,24 +226,24 @@ func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyCompressedProof(opt
 
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf11817b2.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf2457c8d.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [4]*big.Int) error {
 	return _MerkleProofVerifier.Contract.VerifyCompressedProof(&_MerkleProofVerifier.CallOpts, compressedProof, input)
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf11817b2.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xf2457c8d.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierCallerSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierCallerSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [4]*big.Int) error {
 	return _MerkleProofVerifier.Contract.VerifyCompressedProof(&_MerkleProofVerifier.CallOpts, compressedProof, input)
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x5fe24f23.
+// VerifyProof is a free data retrieval call binding the contract method 0x23572511.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyProof(opts *bind.CallOpts, proof [8]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyProof(opts *bind.CallOpts, proof [8]*big.Int, input [4]*big.Int) error {
 	var out []interface{}
 	err := _MerkleProofVerifier.contract.Call(opts, &out, "verifyProof", proof, input)
 
@@ -255,16 +255,16 @@ func (_MerkleProofVerifier *MerkleProofVerifierCaller) VerifyProof(opts *bind.Ca
 
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x5fe24f23.
+// VerifyProof is a free data retrieval call binding the contract method 0x23572511.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierSession) VerifyProof(proof [8]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierSession) VerifyProof(proof [8]*big.Int, input [4]*big.Int) error {
 	return _MerkleProofVerifier.Contract.VerifyProof(&_MerkleProofVerifier.CallOpts, proof, input)
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x5fe24f23.
+// VerifyProof is a free data retrieval call binding the contract method 0x23572511.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[2] input) view returns()
-func (_MerkleProofVerifier *MerkleProofVerifierCallerSession) VerifyProof(proof [8]*big.Int, input [2]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[4] input) view returns()
+func (_MerkleProofVerifier *MerkleProofVerifierCallerSession) VerifyProof(proof [8]*big.Int, input [4]*big.Int) error {
 	return _MerkleProofVerifier.Contract.VerifyProof(&_MerkleProofVerifier.CallOpts, proof, input)
 }

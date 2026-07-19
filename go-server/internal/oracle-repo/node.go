@@ -390,13 +390,13 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 		}
 	}
 
-	// The Redeeming proof must be against a commitment root the Gateway has
-	// recorded (paper SIV-E Steps 6-7).
-	witnessRoot, rootErr := redeemingWitnessRoot(publicWitness)
+	// Decode the exact public layout: d_dst, R_comm, h_n, a_dst.
+	publicInputs, rootErr := redeemingPublicInputs(publicWitness)
 	rootPublished := false
 	if rootErr == nil {
-		rootPublished, rootErr = n.isPublishedCommitmentRoot(witnessRoot)
+		rootPublished, rootErr = n.isPublishedCommitmentRoot(publicInputs.CommitmentRoot)
 	}
+	configuredDestination, destinationOK := new(big.Int).SetString(n.cfg.DestinationID, 10)
 
 	var isApproved *big.Int
 	if n.IsNullifierSpent(nullifierKey) {
@@ -406,7 +406,16 @@ func (n *Node) VerifyClaim(claimEvent *bc.OracleClaimSubmitted) (*WiVote, error)
 		fmt.Printf("rejecting claim: cannot validate commitment root (node=%v): %v\n", n.ID, rootErr)
 		isApproved = big.NewInt(0)
 	} else if !rootPublished {
-		fmt.Printf("rejecting claim: commitment root not recorded by the gateway (node=%v root=%s)\n", n.ID, witnessRoot)
+		fmt.Printf("rejecting claim: commitment root not recorded by the gateway (node=%v root=%s)\n", n.ID, publicInputs.CommitmentRoot)
+		isApproved = big.NewInt(0)
+	} else if !destinationOK || publicInputs.DestinationID.Cmp(configuredDestination) != 0 || publicInputs.DestinationID.Cmp(claimEvent.DestinationID) != 0 {
+		fmt.Printf("rejecting claim: destination mismatch (node=%v)\n", n.ID)
+		isApproved = big.NewInt(0)
+	} else if publicInputs.NullifierHash.Cmp(new(big.Int).SetBytes(claimEvent.NullifierHash[:])) != 0 {
+		fmt.Printf("rejecting claim: nullifier public input mismatch (node=%v)\n", n.ID)
+		isApproved = big.NewInt(0)
+	} else if publicInputs.RecipientAddress.Cmp(new(big.Int).SetBytes(claimEvent.Recipient.Bytes())) != 0 {
+		fmt.Printf("rejecting claim: recipient public input mismatch (node=%v)\n", n.ID)
 		isApproved = big.NewInt(0)
 	} else if err := groth16.Verify(proof, n.Oracle.IncVK, publicWitness); err != nil {
 		fmt.Printf("failed to verify claim proof (node=%v): %v\n", n.ID, err)
@@ -494,14 +503,26 @@ func (n *Node) SignBatchVote(batchIDs []*big.Int, roundID *big.Int, batchCommitm
 	}, nil
 }
 
-// redeemingWitnessRoot extracts the public RootHash input (Algorithm 1) from
-// a Redeeming-proof public witness.
-func redeemingWitnessRoot(w witness.Witness) (*big.Int, error) {
+type redeemingInputs struct {
+	DestinationID    *big.Int
+	CommitmentRoot   *big.Int
+	NullifierHash    *big.Int
+	RecipientAddress *big.Int
+}
+
+// redeemingPublicInputs extracts Algorithm 1's exact public-input order:
+// d_dst, R_comm, h_n, a_dst.
+func redeemingPublicInputs(w witness.Witness) (*redeemingInputs, error) {
 	vec, ok := w.Vector().(fr.Vector)
-	if !ok || len(vec) == 0 {
+	if !ok || len(vec) != 4 {
 		return nil, fmt.Errorf("unexpected public witness layout")
 	}
-	return vec[0].BigInt(new(big.Int)), nil
+	return &redeemingInputs{
+		DestinationID:    vec[0].BigInt(new(big.Int)),
+		CommitmentRoot:   vec[1].BigInt(new(big.Int)),
+		NullifierHash:    vec[2].BigInt(new(big.Int)),
+		RecipientAddress: vec[3].BigInt(new(big.Int)),
+	}, nil
 }
 
 // isPublishedCommitmentRoot checks the Gateway's record of commitment roots

@@ -29,7 +29,8 @@ contract DeployOracle is Script {
             seedY,
             votingVerifierAddress,
             batchSize,
-            aggregatorTimeout
+            aggregatorTimeout,
+            vm.envUint("DESTINATION_ID")
         );
 
         oracleAddr = address(oracle);

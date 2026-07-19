@@ -4,6 +4,10 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import "../src/oracle.sol";
 
+contract MockVotingVerifier {
+    function verifyProof(uint256[8] memory, uint256[11] memory) external pure {}
+}
+
 /// @notice Gateway conformance tests (F-30): cover the paper-mandated
 /// rules that are checkable without a Groth16 proof — claim/mint gating
 /// (F-05), sequential batch identifiers (F-07), aggregator gating (F-13),
@@ -18,18 +22,22 @@ contract OracleTest is Test {
     address internal validator1 = address(0xA1);
     address internal user = address(0xB0);
     address internal stranger = address(0xC0);
+    address internal recipient = address(0xD0);
 
     uint256 internal constant BATCH_SIZE = 4;
     uint256 internal constant AGG_TIMEOUT = 300;
+    uint256 internal constant DESTINATION_ID = 7;
 
     function setUp() public {
+        MockVotingVerifier mockVerifier = new MockVotingVerifier();
         oracle = new Oracle(
             3, // levels
             1, // seedX
             2, // seedY
-            address(0xBEEF), // voting verifier (never reached in these tests)
+            address(mockVerifier),
             BATCH_SIZE,
-            AGG_TIMEOUT
+            AGG_TIMEOUT,
+            DESTINATION_ID
         );
 
         vm.deal(validator0, 100 ether);
@@ -48,6 +56,8 @@ contract OracleTest is Test {
 
         vm.prank(user);
         oracle.registerUser(Oracle.PublicKey({x: 31, y: 32}));
+        vm.prank(recipient);
+        oracle.registerUser(Oracle.PublicKey({x: 41, y: 42}));
     }
 
     // region registration
@@ -98,9 +108,11 @@ contract OracleTest is Test {
                 i,
                 hex"aa",
                 hex"bb",
-                bytes32(uint256(0x100 + i))
+                bytes32(uint256(0x100 + i)),
+                DESTINATION_ID,
+                user
             );
-            oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100 + i)));
+            oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100 + i)), DESTINATION_ID, user);
         }
     }
 
@@ -108,7 +120,7 @@ contract OracleTest is Test {
     /// before the round's Aggregating proof verifies.
     function testClaimDoesNotMint() public {
         vm.prank(user);
-        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)));
+        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)), DESTINATION_ID, user);
 
         vm.prank(user);
         (, uint256 claimBalance) = oracle.viewBalance();
@@ -118,7 +130,42 @@ contract OracleTest is Test {
     function testClaimUnregisteredReverts() public {
         vm.prank(stranger);
         vm.expectRevert(bytes("address not registered"));
-        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)));
+        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)), DESTINATION_ID, user);
+    }
+
+    function testClaimWrongDestinationReverts() public {
+        vm.prank(user);
+        vm.expectRevert(bytes("wrong destination"));
+        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)), DESTINATION_ID + 1, user);
+    }
+
+    function testClaimRequiresRecipient() public {
+        vm.prank(user);
+        vm.expectRevert(bytes("recipient required"));
+        oracle.claim(hex"aa", hex"bb", bytes32(uint256(0x100)), DESTINATION_ID, address(0));
+    }
+
+    function testAcceptedClaimMintsToProofBoundRecipientAndBlocksReplay() public {
+        bytes32 nullifierHash = bytes32(uint256(0x100));
+        vm.prank(user);
+        oracle.claim(hex"aa", hex"bb", nullifierHash, DESTINATION_ID, recipient);
+
+        uint256[8] memory proof;
+        uint256 currentRoot = oracle.getRoot();
+        vm.prank(validator0);
+        oracle.submitWiVote(0, 0, 0, 0, 0, 1, currentRoot, 3, 4, proof);
+
+        vm.prank(user);
+        (, uint256 submitterBalance) = oracle.viewBalance();
+        vm.prank(recipient);
+        (, uint256 recipientBalance) = oracle.viewBalance();
+        assertEq(submitterBalance, 0);
+        assertEq(recipientBalance, 100);
+        assertTrue(oracle.spentNullifiers(nullifierHash));
+
+        vm.prank(user);
+        vm.expectRevert(bytes("nullifier already spent"));
+        oracle.claim(hex"aa", hex"bb", nullifierHash, DESTINATION_ID, user);
     }
 
     // endregion
@@ -250,7 +297,7 @@ contract OracleTest is Test {
 
     function testConstructorRejectsZeroBatchSize() public {
         vm.expectRevert(bytes("invalid batch size"));
-        new Oracle(3, 1, 2, address(0xBEEF), 0, AGG_TIMEOUT);
+        new Oracle(3, 1, 2, address(0xBEEF), 0, AGG_TIMEOUT, DESTINATION_ID);
     }
 
     // endregion

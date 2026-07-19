@@ -59,7 +59,7 @@ type Config struct {
 	IncTreeDepth            int   `env:"INC_TREE_DEPTH,required"`
 	// DestinationID is the per-deployment destination-rollup identifier
 	// d_dst (paper SIV-E; F-24): one value per Gateway instance, used in the
-	// burn commitment C = H(n_rd || s_rd || d_dst). Decimal field element.
+	// burn commitment C = H(n_rd || s_rd || d_dst || a_dst). Decimal field element.
 	DestinationID string `env:"DESTINATION_ID" default:"9636219578937187601590327046728695236698322465209974782280717458744997515735"`
 	// BurnConfirmationDepth is the source-rollup finality rule used before
 	// inserting burns into the commitment tree (paper SIV-E / SVII-C;

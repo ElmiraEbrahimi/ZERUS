@@ -68,13 +68,14 @@ type User struct {
 }
 
 // BurnNote holds the private parameters of a single burn commitment
-// C = H(n_rd || s_rd || d_dst); it is consumed by the claim that spends it.
+// C = H(n_rd || s_rd || d_dst || a_dst); it is consumed by its claim.
 type BurnNote struct {
-	CommitmentHashBytes []byte
-	NullifierBytes      []byte
-	NullifierHashBytes  []byte
-	SecretBytes         []byte
-	DestinationIDBytes  []byte
+	CommitmentHashBytes   []byte
+	NullifierBytes        []byte
+	NullifierHashBytes    []byte
+	SecretBytes           []byte
+	DestinationIDBytes    []byte
+	RecipientAddressBytes []byte
 }
 
 type persistedUserState struct {
@@ -82,11 +83,12 @@ type persistedUserState struct {
 
 	// Legacy single-burn fields, kept so state files written before the
 	// pending-burns queue still load (migrated as one queued note).
-	CommitmentHashBytes []byte
-	NullifierBytes      []byte
-	NullifierHashBytes  []byte
-	SecretBytes         []byte
-	DestinationIDBytes  []byte
+	CommitmentHashBytes   []byte
+	NullifierBytes        []byte
+	NullifierHashBytes    []byte
+	SecretBytes           []byte
+	DestinationIDBytes    []byte
+	RecipientAddressBytes []byte
 }
 
 type CircuitMemTime struct {
@@ -248,11 +250,12 @@ func (u *User) loadState() error {
 	if len(u.pendingBurns) == 0 && len(state.CommitmentHashBytes) > 0 {
 		// Migrate a legacy single-burn state file into the queue.
 		u.pendingBurns = []BurnNote{{
-			CommitmentHashBytes: state.CommitmentHashBytes,
-			NullifierBytes:      state.NullifierBytes,
-			NullifierHashBytes:  state.NullifierHashBytes,
-			SecretBytes:         state.SecretBytes,
-			DestinationIDBytes:  state.DestinationIDBytes,
+			CommitmentHashBytes:   state.CommitmentHashBytes,
+			NullifierBytes:        state.NullifierBytes,
+			NullifierHashBytes:    state.NullifierHashBytes,
+			SecretBytes:           state.SecretBytes,
+			DestinationIDBytes:    state.DestinationIDBytes,
+			RecipientAddressBytes: state.RecipientAddressBytes,
 		}}
 	}
 
@@ -386,7 +389,7 @@ func (u *User) getLatestIPFSHashView() (string, error) {
 
 // destinationID returns the per-deployment destination-rollup identifier
 // d_dst (paper SIV-E; F-24): configured per Gateway instance, used when
-// forming the burn commitment C = H(n_rd || s_rd || d_dst).
+// forming the burn commitment C = H(n_rd || s_rd || d_dst || a_dst).
 func (u *User) destinationID() (*big.Int, error) {
 	id, ok := new(big.Int).SetString(u.cfg.DestinationID, 10)
 	if !ok {
@@ -422,6 +425,9 @@ func (u *User) BurnTx() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("create keyed transactor: %w", err)
 	}
+	// The destination recipient is the burning user's Ethereum address.
+	// This is the same address observed as msg.sender by Oracle.burn.
+	recipient := trxOpts.From
 
 	pendingNonce, err := u.ethClient.PendingNonceAt(context.Background(), trxOpts.From)
 	if err != nil {
@@ -441,7 +447,7 @@ func (u *User) BurnTx() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes := CalculateCommitmentHash(destinationID)
+	commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, recipientAddressBytes := CalculateCommitmentHash(destinationID, recipient)
 
 	// burn the amount:
 	var commitmentHash [32]byte
@@ -475,11 +481,12 @@ func (u *User) BurnTx() (string, string, error) {
 
 	// Queue the burn's private parameters for a later claim (oldest first).
 	u.pendingBurns = append(u.pendingBurns, BurnNote{
-		CommitmentHashBytes: commitmentHashBytes[:],
-		NullifierBytes:      nullifierBytes[:],
-		NullifierHashBytes:  nullifierHashBytes[:],
-		SecretBytes:         secretBytes[:],
-		DestinationIDBytes:  destinationIDBytes[:],
+		CommitmentHashBytes:   commitmentHashBytes[:],
+		NullifierBytes:        nullifierBytes[:],
+		NullifierHashBytes:    nullifierHashBytes[:],
+		SecretBytes:           secretBytes[:],
+		DestinationIDBytes:    destinationIDBytes[:],
+		RecipientAddressBytes: recipientAddressBytes[:],
 	})
 	if err := u.saveState(); err != nil {
 		return "", "", fmt.Errorf("failed to persist user state (user=%v): %w", u.Name, err)
@@ -567,6 +574,9 @@ func (u *User) WithdrawTx() (string, error) {
 	}
 	// Claim the oldest unclaimed burn.
 	note := u.pendingBurns[0]
+	if len(note.RecipientAddressBytes) != common.AddressLength {
+		return "", fmt.Errorf("burn note predates recipient-bound commitments; create a new burn")
+	}
 
 	// The aggregator publishes the appended leaves to the DFS and records
 	// the finalized root on the Gateway shortly after the burn batch fills
@@ -599,10 +609,11 @@ func (u *User) WithdrawTx() (string, error) {
 	witness.Nullifier = new(big.Int).SetBytes(note.NullifierBytes)
 	witness.Secret = new(big.Int).SetBytes(note.SecretBytes)
 	witness.DestinationID = new(big.Int).SetBytes(note.DestinationIDBytes)
+	witness.RecipientAddress = new(big.Int).SetBytes(note.RecipientAddressBytes)
 
 	witness.Leaf = proofIndex
 	witness.NullifierHash = note.NullifierHashBytes
-	witness.M.RootHash = merkleRoot
+	witness.M.RootHash = new(big.Int).SetBytes(merkleRoot)
 
 	witness.M.Path = make([]frontend.Variable, depth+1)
 	for i := 0; i < depth+1; i++ {
@@ -613,6 +624,7 @@ func (u *User) WithdrawTx() (string, error) {
 	fmt.Printf("Nullifier: %x\n", witness.Nullifier)
 	fmt.Printf("Secret: %x\n", witness.Secret)
 	fmt.Printf("DestinationID: %x\n", witness.DestinationID)
+	fmt.Printf("RecipientAddress: %x\n", witness.RecipientAddress)
 	fmt.Printf("Leaf Index: %d\n", witness.Leaf)
 	// fmt.Printf("Commitment Hash: %x\n", witness.CommitmentHash)
 	fmt.Printf("Nullifier Hash: %x\n", witness.NullifierHash)
@@ -699,7 +711,7 @@ func (u *User) WithdrawTx() (string, error) {
 		return "", fmt.Errorf("failed to marshal public witness (user=%v): %v", u.Name, err)
 	}
 
-	tx, err := bcClient.Claim(trxOpts, proofBytes, publicWitnessBytes, [32]byte(note.NullifierHashBytes))
+	tx, err := bcClient.Claim(trxOpts, proofBytes, publicWitnessBytes, [32]byte(note.NullifierHashBytes), new(big.Int).SetBytes(note.DestinationIDBytes), common.BytesToAddress(note.RecipientAddressBytes))
 	if err != nil {
 		return "", fmt.Errorf("call Claim() function: %w", err)
 	}
@@ -776,10 +788,10 @@ func NullifierHashBytes(nullifier *big.Int) []byte {
 }
 
 // CalculateCommitmentHash draws a fresh (nullifier, secret) pair and forms
-// the burn commitment C = H(n_rd || s_rd || d_dst) (paper SIV-E). The
+// the burn commitment C = H(n_rd || s_rd || d_dst || a_dst) (paper SIV-E).
 // destination-rollup identifier d_dst is a per-deployment configuration
 // value (F-24), one per Gateway instance.
-func CalculateCommitmentHash(destinationID *big.Int) (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes []byte) {
+func CalculateCommitmentHash(destinationID *big.Int, recipient common.Address) (commitmentHashBytes, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, recipientAddressBytes []byte) {
 	mod := ecc.BN254.ScalarField()
 	nullifier, _ := util.GenerateRandomBigInt32Bytes(mod)
 	secret, _ := util.GenerateRandomBigInt32Bytes(mod)
@@ -789,6 +801,7 @@ func CalculateCommitmentHash(destinationID *big.Int) (commitmentHashBytes, nulli
 	mimcHash.Write(util.PadTo32Bytes(nullifier))
 	mimcHash.Write(util.PadTo32Bytes(secret))
 	mimcHash.Write(util.PadTo32Bytes(destinationID))
+	mimcHash.Write(util.PadTo32Bytes(new(big.Int).SetBytes(recipient.Bytes())))
 	commitmentHash := mimcHash.Sum(nil)
 
 	nullifierHash := NullifierHashBytes(nullifier)
@@ -798,6 +811,7 @@ func CalculateCommitmentHash(destinationID *big.Int) (commitmentHashBytes, nulli
 	nullifierHashBytes = []byte(nullifierHash)
 	secretBytes = []byte(util.PadTo32Bytes(secret))
 	destinationIDBytes = []byte(util.PadTo32Bytes(destinationID))
+	recipientAddressBytes = recipient.Bytes()
 
-	return commitmentHash, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes
+	return commitmentHash, nullifierBytes, nullifierHashBytes, secretBytes, destinationIDBytes, recipientAddressBytes
 }

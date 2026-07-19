@@ -661,8 +661,10 @@ func (l *L2ContractEventSubscriber) handleClaimSubmitted(evlog types.Log) {
 		return
 	}
 	log.Printf(
-		"l2 event ClaimSubmitted: uniqueID=%s nullifierHash=%s proof=0x%x publicWitness=0x%x proofLen=%d publicWitnessLen=%d %s",
+		"l2 event ClaimSubmitted: uniqueID=%s destinationID=%s recipient=%s nullifierHash=%s proof=0x%x publicWitness=0x%x proofLen=%d publicWitnessLen=%d %s",
 		evt.UniqueID,
+		evt.DestinationID,
+		evt.Recipient.Hex(),
 		common.BytesToHash(evt.NullifierHash[:]).Hex(),
 		evt.Proof,
 		evt.PublicWitness,

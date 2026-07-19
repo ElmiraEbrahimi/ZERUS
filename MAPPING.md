@@ -8,7 +8,7 @@ artifact reviewers can cross-reference (F-29).
 |---|---|
 | Gateway contract (L2) | `contracts/src/oracle.sol` (`Oracle`, extends `MerkleTree`) |
 | Hub contract (L1) | `contracts/src/L1Hub.sol` (`L1Hub`; deployed via `make deploy-l1hub`) |
-| Burn (source rollup) | `Oracle.burn(commitmentHash)`; client `user.BurnTx()` |
+| Burn (source rollup) | `Oracle.burn(commitmentHash)`; client `user.BurnTx()` binds `a_dst` to the burn sender |
 | Claim (mint on destination) | user "withdraw": `POST /users/default/withdraw` → `user.WithdrawTx()` → `Oracle.claim(...)` |
 | Claim vote (per request) | `WiVote` ("withdrawal vote") |
 | Batch vote (b-bit bitmask) | `SignedBatchVote` (validator-signed, paper §IV-D Step 14) |
@@ -25,7 +25,8 @@ artifact reviewers can cross-reference (F-29).
 | Validator registration on L1 (§IV-C) | `L1Hub.registerValidatorL1` → `batchImportValidatorsToL2` → `Oracle.importValidatorsFromL1` |
 | Validator replacement (§IV-C) | `L1Hub.requestReplacementL1` → `Oracle.replaceValidatorFromL1`; direct L2 path `Oracle.replace` |
 | Exit / stake withdrawal (§IV-C) | `Oracle.exit` / `Oracle.withdraw` → L2→L1 messages → `L1Hub.finalizeFromL2` (timelocked release) |
-| Destination-rollup id `d_dst` | `DESTINATION_ID` config, used in `C = H(n_rd ∥ s_rd ∥ d_dst)` |
+| Redeeming public inputs | `d_dst, R_comm, h_n, a_dst` |
+| Destination-rollup id `d_dst` | `DESTINATION_ID` config, used in `C = H(n_rd ∥ s_rd ∥ d_dst ∥ a_dst)` |
 | DFS | IPFS via HTTP API (`IPFS_API_URL`); local simulation fallback (`internal/oracle-repo/db/ipfs.go`) |
 | Source rollup L2A / destination L2B (§V) | `SOURCE_RPC_URL` + `SOURCE_ORACLE_CONTRACT_ADDRESS` profile (source) vs. local Gateway (destination) |
 | Go module | `l2alchemy` (ZERUS); the L1-anchored baseline uses `l1alchemy` |

@@ -13,15 +13,16 @@ type MerkleProof struct {
 
 // MerkleProofCircuit represents the ZK circuit for verifying a Merkle proof.
 type MerkleProofCircuit struct {
-	M    MerkleProof       // Public: Merkle root
-	Leaf frontend.Variable // The leaf value to be verified
+	// Public inputs. Keep this declaration order aligned with Algorithm 1:
+	// d_dst, R_comm, h_n, a_dst.
+	DestinationID    frontend.Variable `gnark:",public"`
+	M                MerkleProof
+	NullifierHash    frontend.Variable `gnark:",public"`
+	RecipientAddress frontend.Variable `gnark:",public"`
+	Leaf             frontend.Variable
 
-	Nullifier     frontend.Variable // secret input
-	Secret        frontend.Variable // secret input
-	DestinationID frontend.Variable // Receiver's ID (could be a wallet address or identifier)
-
-	NullifierHash frontend.Variable `gnark:",public"` // public output
-
+	Nullifier frontend.Variable
+	Secret    frontend.Variable
 }
 
 // LeafSum calculates the hash for a leaf node.
@@ -57,7 +58,7 @@ func (mp *MerkleProof) VerifyProofIncremental(api frontend.API, h mimc.MiMC, lea
 
 	// Check if the calculated root matches the provided root
 	api.Println("[Circuit] calculated rootHash", sum)
-	api.Println("[Withdrawer] calculated rootHash", mp.RootHash)
+	api.Println("[Withdrawer] expected rootHash", mp.RootHash)
 	api.AssertIsEqual(sum, mp.RootHash)
 }
 
@@ -78,11 +79,12 @@ func (circuit *MerkleProofCircuit) Define(api frontend.API) error {
 
 	// Reset the MiMC hash for the next computation
 
-	// Compute the hash using nullifier and secret
+	// C = H(n_rd, s_rd, d_dst, a_dst). Do not change this order.
 	h.Reset()
 	h.Write(circuit.Nullifier)
 	h.Write(circuit.Secret)
 	h.Write(circuit.DestinationID)
+	h.Write(circuit.RecipientAddress)
 
 	hash := h.Sum()
 
