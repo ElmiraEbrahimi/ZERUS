@@ -1073,6 +1073,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	}
 
 	assignment := votingbatch.BatchingVotingCircuit{
+		PreStateRoot:       aggregatorRootBytes,
 		ResultingStateRoot: postStateRoot,
 		//RoundID:            n.Oracle.RoundID,
 		RoundID:          new(big.Int).Set(roundID),
@@ -1086,6 +1087,7 @@ func (n *Node) processBatchedWiVotes(withdrawalReqIDs []*big.Int) (*big.Int, err
 	}
 
 	// Print all variables used in the assignment
+	fmt.Printf("PreStateRoot: %v\n", aggregatorRootBytes)
 	fmt.Printf("ResultingStateRoot: %v\n", postStateRoot)
 	fmt.Printf("RoundID: %v\n", new(big.Int).Set(roundID))
 	fmt.Printf("BatchCommitment: %v\n", batchCommitment[:32])

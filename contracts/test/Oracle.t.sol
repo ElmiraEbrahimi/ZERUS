@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../src/oracle.sol";
 
 contract MockVotingVerifier {
-    function verifyProof(uint256[8] memory, uint256[11] memory) external pure {}
+    function verifyProof(uint256[8] memory, uint256[12] memory) external pure {}
 }
 
 /// @notice Gateway conformance tests (F-30): cover the paper-mandated
@@ -17,6 +17,7 @@ contract MockVotingVerifier {
 /// nullifier marking) are exercised by the Go integration flow.
 contract OracleTest is Test {
     Oracle internal oracle;
+    MockVotingVerifier internal mockVerifier;
 
     address internal validator0 = address(0xA0);
     address internal validator1 = address(0xA1);
@@ -29,7 +30,7 @@ contract OracleTest is Test {
     uint256 internal constant DESTINATION_ID = 7;
 
     function setUp() public {
-        MockVotingVerifier mockVerifier = new MockVotingVerifier();
+        mockVerifier = new MockVotingVerifier();
         oracle = new Oracle(
             3, // levels
             1, // seedX
@@ -166,6 +167,35 @@ contract OracleTest is Test {
         vm.prank(user);
         vm.expectRevert(bytes("nullifier already spent"));
         oracle.claim(hex"aa", hex"bb", nullifierHash, DESTINATION_ID, user);
+    }
+
+    function testSubmitWiVoteBindsProofToCurrentPreStateRoot() public {
+        uint256[8] memory proof;
+        uint256 preStateRoot = oracle.getRoot();
+        uint256 postStateRoot = preStateRoot + 123;
+
+        uint256[12] memory expectedInput = [
+            preStateRoot,
+            postStateRoot,
+            uint256(0),
+            uint256(0),
+            uint256(1),
+            uint256(0),
+            uint256(0),
+            uint256(0),
+            uint256(1),
+            uint256(2),
+            uint256(3),
+            uint256(4)
+        ];
+
+        vm.expectCall(
+            address(mockVerifier),
+            abi.encodeCall(MockVotingVerifier.verifyProof, (proof, expectedInput))
+        );
+
+        vm.prank(validator0);
+        oracle.submitWiVote(0, 0, 0, 0, 0, 1, postStateRoot, 3, 4, proof);
     }
 
     // endregion

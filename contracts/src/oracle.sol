@@ -542,7 +542,9 @@ contract Oracle is MerkleTree {
 
         wiVotes[roundId] = vote;
 
-        uint[11] memory input = [
+        uint256 preStateRoot = getRoot();
+        uint[12] memory input = [
+            preStateRoot,
             postStateRoot,
             roundId,
             batchCommitment,

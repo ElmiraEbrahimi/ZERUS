@@ -20,6 +20,7 @@ const (
 )
 
 type BatchingVotingCircuit struct {
+	PreStateRoot       frontend.Variable `gnark:",public"`
 	ResultingStateRoot frontend.Variable `gnark:",public"`
 	//*** RoundID, BatchCommitment, WithdrawalReqIDs are newly added ***
 	RoundID          frontend.Variable   `gnark:",public"` // Public round index
@@ -68,6 +69,7 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 
 	api.Println(" DUMPING VOTING CIRCUIT BATCHING INPUTS FORM OUTSIDE ")
 
+	api.Println("[batching_out] PreStateRoot:", c.PreStateRoot)
 	api.Println("[batching_out] RoundID:", c.RoundID)
 	api.Println("[batching_out]  MajorityVote:", c.MajorityVote)
 	api.Println("[batching_out_circuit] ***** Aggregator Index:", c.Aggregator.Index)
@@ -134,11 +136,15 @@ func (c *BatchingVotingCircuit) Define(api frontend.API) error {
 	api.Println("[batching_out]  Aggregator MerkleProof Path[0]:", c.Aggregator.MerkleProof.Path[0])
 	api.Println("[batching_circuit] Aggregator computed leaf hash:", hFunc.Sum())
 
+	// Keep the witness root consistent with the public pre-state root. The
+	// actual membership check below is against PreStateRoot, which the Gateway
+	// supplies from its current stored validator-state root.
+	api.AssertIsEqual(c.Aggregator.MerkleProof.RootHash, c.PreStateRoot)
 	api.AssertIsEqual(hFunc.Sum(), c.Aggregator.MerkleProof.Path[0])
 	hFunc.Reset()
 	// The aggregator's membership seeds the R_int chain from the pre-round
 	// state root (paper Alg. 2 line 8).
-	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index, c.Aggregator.MerkleProof.RootHash)
+	c.Aggregator.MerkleProof.VerifyProof(api, hFunc, c.Aggregator.Index, c.PreStateRoot)
 	api.Println("[batching_circuit] Aggregator Verified Merkle proof...")
 	// Reward the aggregator for the batch
 	hFunc.Reset()

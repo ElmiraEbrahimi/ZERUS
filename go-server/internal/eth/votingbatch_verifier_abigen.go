@@ -31,7 +31,7 @@ var (
 
 // VotingBatchVerifierMetaData contains all meta data concerning the VotingBatchVerifier contract.
 var VotingBatchVerifierMetaData = &bind.MetaData{
-	ABI: "[{\"type\":\"function\",\"name\":\"compressProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[{\"name\":\"compressed\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyCompressedProof\",\"inputs\":[{\"name\":\"compressedProof\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"},{\"name\":\"input\",\"type\":\"uint256[11]\",\"internalType\":\"uint256[11]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"},{\"name\":\"input\",\"type\":\"uint256[11]\",\"internalType\":\"uint256[11]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"error\",\"name\":\"ProofInvalid\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"PublicInputNotInField\",\"inputs\":[]}]",
+	ABI: "[{\"type\":\"function\",\"name\":\"compressProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"}],\"outputs\":[{\"name\":\"compressed\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"}],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyCompressedProof\",\"inputs\":[{\"name\":\"compressedProof\",\"type\":\"uint256[4]\",\"internalType\":\"uint256[4]\"},{\"name\":\"input\",\"type\":\"uint256[12]\",\"internalType\":\"uint256[12]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"function\",\"name\":\"verifyProof\",\"inputs\":[{\"name\":\"proof\",\"type\":\"uint256[8]\",\"internalType\":\"uint256[8]\"},{\"name\":\"input\",\"type\":\"uint256[12]\",\"internalType\":\"uint256[12]\"}],\"outputs\":[],\"stateMutability\":\"view\"},{\"type\":\"error\",\"name\":\"ProofInvalid\",\"inputs\":[]},{\"type\":\"error\",\"name\":\"PublicInputNotInField\",\"inputs\":[]}]",
 }
 
 // VotingBatchVerifierABI is the input ABI used to generate the binding from.
@@ -211,10 +211,10 @@ func (_VotingBatchVerifier *VotingBatchVerifierCallerSession) CompressProof(proo
 	return _VotingBatchVerifier.Contract.CompressProof(&_VotingBatchVerifier.CallOpts, proof)
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0x98ea1c08.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xb28408ae.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyCompressedProof(opts *bind.CallOpts, compressedProof [4]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyCompressedProof(opts *bind.CallOpts, compressedProof [4]*big.Int, input [12]*big.Int) error {
 	var out []interface{}
 	err := _VotingBatchVerifier.contract.Call(opts, &out, "verifyCompressedProof", compressedProof, input)
 
@@ -226,24 +226,24 @@ func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyCompressedProof(opt
 
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0x98ea1c08.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xb28408ae.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [12]*big.Int) error {
 	return _VotingBatchVerifier.Contract.VerifyCompressedProof(&_VotingBatchVerifier.CallOpts, compressedProof, input)
 }
 
-// VerifyCompressedProof is a free data retrieval call binding the contract method 0x98ea1c08.
+// VerifyCompressedProof is a free data retrieval call binding the contract method 0xb28408ae.
 //
-// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierCallerSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyCompressedProof(uint256[4] compressedProof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierCallerSession) VerifyCompressedProof(compressedProof [4]*big.Int, input [12]*big.Int) error {
 	return _VotingBatchVerifier.Contract.VerifyCompressedProof(&_VotingBatchVerifier.CallOpts, compressedProof, input)
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x8261a653.
+// VerifyProof is a free data retrieval call binding the contract method 0x8aa330f1.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyProof(opts *bind.CallOpts, proof [8]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyProof(opts *bind.CallOpts, proof [8]*big.Int, input [12]*big.Int) error {
 	var out []interface{}
 	err := _VotingBatchVerifier.contract.Call(opts, &out, "verifyProof", proof, input)
 
@@ -255,16 +255,16 @@ func (_VotingBatchVerifier *VotingBatchVerifierCaller) VerifyProof(opts *bind.Ca
 
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x8261a653.
+// VerifyProof is a free data retrieval call binding the contract method 0x8aa330f1.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierSession) VerifyProof(proof [8]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierSession) VerifyProof(proof [8]*big.Int, input [12]*big.Int) error {
 	return _VotingBatchVerifier.Contract.VerifyProof(&_VotingBatchVerifier.CallOpts, proof, input)
 }
 
-// VerifyProof is a free data retrieval call binding the contract method 0x8261a653.
+// VerifyProof is a free data retrieval call binding the contract method 0x8aa330f1.
 //
-// Solidity: function verifyProof(uint256[8] proof, uint256[11] input) view returns()
-func (_VotingBatchVerifier *VotingBatchVerifierCallerSession) VerifyProof(proof [8]*big.Int, input [11]*big.Int) error {
+// Solidity: function verifyProof(uint256[8] proof, uint256[12] input) view returns()
+func (_VotingBatchVerifier *VotingBatchVerifierCallerSession) VerifyProof(proof [8]*big.Int, input [12]*big.Int) error {
 	return _VotingBatchVerifier.Contract.VerifyProof(&_VotingBatchVerifier.CallOpts, proof, input)
 }
